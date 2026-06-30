@@ -1,0 +1,5 @@
+[application]
+name = "青蔥背單字"
+
+[bundle]
+identifier = "com.scallion.vocab"

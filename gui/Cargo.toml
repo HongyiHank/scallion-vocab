@@ -1,0 +1,18 @@
+[package]
+name = "scallion-vocab"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dioxus = { version = "0.7", features = ["mobile"] }
+dioxus-desktop = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+url = "2"
+percent-encoding = "2"
+fastrand = "2"
+tokio = { version = "1", features = ["time"] }
+
+# --- Quizlet scraper library ---
+quizlet_scraper = { path = "../quizlet_scraper" }

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Adaptive icon background: white -->
+    <color name="ic_launcher_background">#FFFFFF</color>
+
+    <!-- MD3 primary color -->
+    <color name="colorPrimary">#279b57</color>
+    <color name="colorPrimaryDark">#1c7a42</color>
+    <color name="colorAccent">#279b57</color>
+</resources>
