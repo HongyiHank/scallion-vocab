@@ -101,23 +101,17 @@ fn App() -> Element {
     });
 
     use_effect(move || {
-        let toast_id = app.toast.read().as_ref().map(|toast| toast.id);
-
-        if let Some(id) = toast_id {
-            spawn(async move {
-                sleep_ms(TOAST_DURATION_MS).await;
-
-                let should_clear = app
-                    .toast
-                    .read()
-                    .as_ref()
-                    .is_some_and(|toast| toast.id == id);
-
-                if should_clear {
-                    app.toast.set(None);
-                }
-            });
-        }
+        let _ = *app.toast_seq.read();
+        let Some(id) = app.toast.read().as_ref().map(|t| t.id) else {
+            return;
+        };
+        spawn(async move {
+            sleep_ms(TOAST_DURATION_MS).await;
+            let mut guard = app.toast.write();
+            if guard.as_ref().map(|t| t.id) == Some(id) {
+                *guard = None;
+            }
+        });
     });
 
     let screen = app.screen.read().clone();
