@@ -1195,7 +1195,9 @@ fn QuizScreen() -> Element {
             OptionsList {}
             ControlButtons {}
         }
-        FsrsRatingBar {}
+        if app.fsrs_config.read().enabled {
+            FsrsRatingBar {}
+        }
         }
         if *show_pause.read() {
             div { class: "pause-overlay",
