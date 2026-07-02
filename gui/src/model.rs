@@ -1,8 +1,100 @@
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 pub(crate) const OPT_COUNT: usize = 4;
 pub(crate) const REVIEW_LO: usize = 8;
 pub(crate) const REVIEW_HI: usize = 15;
+
+// ── FSRS types ──
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum FsrsRating {
+    Again = 1,
+    Hard = 2,
+    Good = 3,
+    Easy = 4,
+}
+
+impl FsrsRating {
+    pub fn label(&self) -> &'static str {
+        match self {
+            FsrsRating::Again => "重來",
+            FsrsRating::Hard => "困難",
+            FsrsRating::Good => "良好",
+            FsrsRating::Easy => "簡單",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CardState {
+    New,
+    Learning,
+    Review,
+    Relearning,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FsrsCard {
+    pub stability: f64,
+    pub difficulty: f64,
+    pub state: CardState,
+    pub lapses: u32,
+}
+
+impl Default for FsrsCard {
+    fn default() -> Self {
+        Self { stability: 0.0, difficulty: 5.0, state: CardState::New, lapses: 0 }
+    }
+}
+
+// ── FSRS-6 algorithm (via fsrs-rs crate) ──
+
+fn fsrs_instance() -> fsrs::FSRS {
+    fsrs::FSRS::default()
+}
+
+/// Convert FSRS stability (days) to a question-count offset.
+fn fsrs_stability_to_offset(stability_days: f32) -> usize {
+    let offset = (stability_days * 10.0).round() as usize;
+    (REVIEW_LO + offset).max(REVIEW_LO)
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FsrsConfig {
+    pub enabled: bool,
+    pub hard_threshold_ms: u64,
+    pub good_threshold_ms: u64,
+    pub easy_threshold_ms: u64,
+}
+
+impl Default for FsrsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            hard_threshold_ms: 10000,
+            good_threshold_ms: 6000,
+            easy_threshold_ms: 3000,
+        }
+    }
+}
+
+impl FsrsConfig {
+    pub fn auto_rating(&self, correct: bool, answer_time_ms: u64) -> FsrsRating {
+        if !correct {
+            return FsrsRating::Again;
+        }
+        if answer_time_ms <= self.easy_threshold_ms {
+            FsrsRating::Easy
+        } else if answer_time_ms <= self.good_threshold_ms {
+            FsrsRating::Good
+        } else {
+            FsrsRating::Hard
+        }
+    }
+}
+
+
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Word {
@@ -25,6 +117,16 @@ pub struct HistoryItem {
     pub skipped: bool,
     pub selected_idx: Option<usize>,
     pub correct_opt: usize,
+    pub question_time: Instant,
+    pub answer_time_ms: Option<u64>,
+    pub auto_rating: Option<FsrsRating>,
+    pub manual_rating: Option<FsrsRating>,
+}
+
+impl HistoryItem {
+    pub fn rating(&self) -> Option<FsrsRating> {
+        self.manual_rating.or(self.auto_rating)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -36,19 +138,30 @@ pub struct ReviewItem {
 #[derive(Clone)]
 pub struct QuizState {
     pub words: Vec<Word>,
+    pub fsrs_cards: Vec<FsrsCard>,
     unseen: Vec<usize>,
     pub history: Vec<HistoryItem>,
     pub review: Vec<ReviewItem>,
     pub current: usize,
     pub infinite: bool,
+    pub fsrs_config: FsrsConfig,
 }
 
 impl QuizState {
-    pub fn new(words: Vec<Word>, infinite: bool) -> Self {
+    pub fn new(words: Vec<Word>, infinite: bool, fsrs_config: FsrsConfig) -> Self {
         let n = words.len();
         let mut unseen: Vec<usize> = (0..n).collect();
         shuffle(&mut unseen);
-        Self { words, unseen, history: vec![], review: vec![], current: 0, infinite }
+        Self {
+            fsrs_cards: vec![FsrsCard::default(); n],
+            words,
+            unseen,
+            history: vec![],
+            review: vec![],
+            current: 0,
+            infinite,
+            fsrs_config,
+        }
     }
 
     pub fn current_question(&self) -> Option<&HistoryItem> {
@@ -132,6 +245,10 @@ impl QuizState {
             skipped: false,
             selected_idx: None,
             correct_opt,
+            question_time: Instant::now(),
+            answer_time_ms: None,
+            auto_rating: None,
+            manual_rating: None,
         });
 
         self.current = self.history.len().saturating_sub(1);
@@ -140,6 +257,48 @@ impl QuizState {
 
     pub fn has_more(&self) -> bool {
         self.infinite || self.current + 1 < self.history.len() || !self.unseen.is_empty()
+    }
+
+    // FSRS-based review scheduling
+    fn schedule_review_fsrs(&mut self, word_idx: usize, rating: FsrsRating) {
+        let card = &self.fsrs_cards[word_idx];
+        let is_new = card.state == CardState::New;
+
+        let prev_memory = if is_new {
+            None
+        } else {
+            // ponytail: all reviews same-session, elapsed_days = 0
+            Some(fsrs::MemoryState { stability: card.stability as f32, difficulty: card.difficulty as f32 })
+        };
+
+        let fsrs = fsrs_instance();
+        let next = fsrs.next_states(prev_memory, 0.9, 0).expect("FSRS next_states");
+        let item = match rating {
+            FsrsRating::Again => next.again,
+            FsrsRating::Hard => next.hard,
+            FsrsRating::Good => next.good,
+            FsrsRating::Easy => next.easy,
+        };
+
+        let new_lapses = card.lapses + if rating == FsrsRating::Again { 1 } else { 0 };
+        let offset = fsrs_stability_to_offset(item.interval);
+
+        self.fsrs_cards[word_idx] = FsrsCard {
+            stability: item.memory.stability as f64,
+            difficulty: item.memory.difficulty as f64,
+            state: match rating {
+                FsrsRating::Again => CardState::Relearning,
+                _ => CardState::Review,
+            },
+            lapses: new_lapses,
+        };
+
+        let due_after = self.history.len().saturating_sub(1) + offset;
+        if let Some(existing) = self.review.iter_mut().find(|r| r.word_idx == word_idx) {
+            existing.due_after = existing.due_after.min(due_after);
+        } else {
+            self.review.push(ReviewItem { word_idx, due_after });
+        }
     }
 
     // queue a word for review; if already queued, keep the earlier due time
@@ -164,13 +323,48 @@ impl QuizState {
         }
 
         let target_idx = self.history[current].target_idx;
-        let should_review = opt_idx != self.history[current].correct_opt;
+        let is_correct = opt_idx == self.history[current].correct_opt;
 
         self.history[current].answered = true;
         self.history[current].selected_idx = Some(opt_idx);
 
-        if should_review {
-            self.schedule_review(target_idx);
+        // Record answer time and auto-select rating
+        let elapsed = self.history[current].question_time.elapsed();
+        let answer_time_ms = elapsed.as_millis() as u64;
+        self.history[current].answer_time_ms = Some(answer_time_ms);
+        let rating = self.fsrs_config.auto_rating(is_correct, answer_time_ms);
+        self.history[current].auto_rating = Some(rating);
+
+        if !is_correct {
+            // Wrong answer: schedule review with FSRS or fallback
+            if self.fsrs_config.enabled {
+                self.schedule_review_fsrs(target_idx, rating);
+            } else {
+                self.schedule_review(target_idx);
+            }
+        } else {
+            // Correct answer: schedule review with FSRS (or not at all for fallback)
+            if self.fsrs_config.enabled {
+                self.schedule_review_fsrs(target_idx, rating);
+            }
+        }
+    }
+
+    pub fn set_rating(&mut self, rating: FsrsRating) {
+        let current = self.current;
+        if current >= self.history.len() {
+            return;
+        }
+        if !self.history[current].answered {
+            return;
+        }
+        let old_rating = self.history[current].rating();
+        self.history[current].manual_rating = Some(rating);
+
+        // Re-schedule if rating changed (only when FSRS is active)
+        if self.fsrs_config.enabled && old_rating != Some(rating) {
+            let target_idx = self.history[current].target_idx;
+            self.schedule_review_fsrs(target_idx, rating);
         }
     }
 
@@ -189,7 +383,17 @@ impl QuizState {
         self.history[current].skipped = true;
         self.history[current].selected_idx = None;
 
-        self.schedule_review(target_idx);
+        // Record time and set Again rating
+        let elapsed = self.history[current].question_time.elapsed();
+        let answer_time_ms = elapsed.as_millis() as u64;
+        self.history[current].answer_time_ms = Some(answer_time_ms);
+        self.history[current].auto_rating = Some(FsrsRating::Again);
+
+        if self.fsrs_config.enabled {
+            self.schedule_review_fsrs(target_idx, FsrsRating::Again);
+        } else {
+            self.schedule_review(target_idx);
+        }
     }
 
     pub fn next(&mut self) {

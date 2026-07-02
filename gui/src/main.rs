@@ -5,7 +5,7 @@ mod licenses;
 
 use dioxus::document;
 use dioxus::prelude::*;
-use model::{sleep_ms, QuizState, Screen, Word};
+use model::{sleep_ms, FsrsConfig, FsrsRating, QuizState, Screen, Word};
 use quizlet_scraper::{build_flashcards_url, extract_deck_id, extract_title, scrape_quizlet_html};
 use percent_encoding::percent_decode;
 use serde::Deserialize;
@@ -32,6 +32,7 @@ struct AppSignals {
     toast_seq: Signal<u64>,
     is_dark: Signal<bool>,
     infinite_mode: Signal<bool>,
+    fsrs_config: Signal<FsrsConfig>,
     prefs_loaded: Signal<bool>,
     recent_urls: Signal<Vec<String>>,
 }
@@ -54,6 +55,7 @@ fn App() -> Element {
         toast_seq: Signal::new(0),
         is_dark: Signal::new(false),
         infinite_mode: Signal::new(true),
+        fsrs_config: Signal::new(FsrsConfig::default()),
         prefs_loaded: Signal::new(false),
         recent_urls: Signal::new(Vec::new()),
     });
@@ -85,6 +87,16 @@ fn App() -> Element {
         }
         spawn(async move {
             persist_infinite_mode(infinite).await;
+        });
+    });
+
+    use_effect(move || {
+        let cfg = app.fsrs_config.cloned();
+        if !*app.prefs_loaded.read() {
+            return;
+        }
+        spawn(async move {
+            persist_fsrs_config(cfg).await;
         });
     });
 
@@ -144,6 +156,7 @@ struct StoredPrefs {
     theme: String,
     urls: Vec<String>,
     infinite_mode: Option<bool>,
+    fsrs_config: Option<String>,
 }
 
 async fn load_prefs(mut app: AppSignals) {
@@ -154,10 +167,11 @@ async fn load_prefs(mut app: AppSignals) {
             document.documentElement.setAttribute('data-theme', theme);
             const urls = JSON.parse(localStorage.getItem('recent_urls') || '[]');
             const infinite_mode = localStorage.getItem('infinite_mode') !== 'false';
-            dioxus.send(JSON.stringify({ theme, urls: Array.isArray(urls) ? urls : [], infinite_mode }));
+            const fsrs_config = localStorage.getItem('fsrs_config') || '';
+            dioxus.send(JSON.stringify({ theme, urls: Array.isArray(urls) ? urls : [], infinite_mode, fsrs_config }));
         } catch (_) {
             document.documentElement.setAttribute('data-theme', 'light');
-            dioxus.send(JSON.stringify({ theme: 'light', urls: [], infinite_mode: true }));
+            dioxus.send(JSON.stringify({ theme: 'light', urls: [], infinite_mode: true, fsrs_config: '' }));
         }
         "#,
     );
@@ -168,6 +182,11 @@ async fn load_prefs(mut app: AppSignals) {
             app.infinite_mode.set(prefs.infinite_mode.unwrap_or(true));
             app.recent_urls
                 .set(clean_recent_urls(prefs.urls, MAX_RECENT_URLS));
+            if let Some(json) = prefs.fsrs_config {
+                if let Ok(cfg) = serde_json::from_str::<FsrsConfig>(&json) {
+                    app.fsrs_config.set(cfg);
+                }
+            }
         } else {
             log!("[Prefs::Load] failed to parse prefs payload");
         }
@@ -195,6 +214,20 @@ async fn persist_theme(is_dark: bool) {
 
     if let Err(e) = document::eval(&script).await {
         log!("[Prefs::Theme] eval failed: {e}");
+    }
+}
+
+async fn persist_fsrs_config(cfg: FsrsConfig) {
+    let Ok(json) = serde_json::to_string(&cfg) else {
+        log!("[Prefs::FsrsConfig] serialize failed");
+        return;
+    };
+    let js = serde_json::to_string(&json).unwrap_or_else(|_| "\"\"".to_string());
+    let script = format!(
+        r#"try {{ localStorage.setItem('fsrs_config', {js}); }} catch (_) {{}}"#
+    );
+    if let Err(e) = document::eval(&script).await {
+        log!("[Prefs::FsrsConfig] save failed: {e}");
     }
 }
 
@@ -361,6 +394,7 @@ fn UploadScreen() -> Element {
     let mut show_licenses = use_signal(|| false);
     let mut selected_dep_name = use_signal(String::new);
     let mut selected_dep_license = use_signal(String::new);
+    let mut settings_tab = use_signal(|| 0); // 0 = 一般, 1 = FSRS
     let auto_resize_textarea = move || {
         spawn(async move {
             let _ = document::eval(
@@ -465,7 +499,7 @@ fn UploadScreen() -> Element {
                             let words = parse_anki_text(text);
                             if !words.is_empty() {
                                 log!("[Upload::Import] success: {} words", words.len());
-                                let mut qs = QuizState::new(words, *app.infinite_mode.read());
+                                let mut qs = QuizState::new(words, *app.infinite_mode.read(), app.fsrs_config.cloned());
                                 if !qs.gen_question() {
                                     push_toast(app, "無法產生題目（無有效單字）");
                                 } else {
@@ -529,7 +563,7 @@ fn UploadScreen() -> Element {
                     match scrape_words_from_html(&html) {
                         Ok((words, title)) => {
                             log!("[Upload::HtmlFallback] success: {} words, title='{}'", words.len(), title);
-                            let mut qs = QuizState::new(words, *app.infinite_mode.read());
+                            let mut qs = QuizState::new(words, *app.infinite_mode.read(), app.fsrs_config.cloned());
                             if !qs.gen_question() {
                                 html_error.set("無法產生題目（無有效單字）".to_string());
                                 html_loading.set(false);
@@ -637,7 +671,7 @@ fn UploadScreen() -> Element {
                                 }
 
                                 let word_count = all_words.len();
-                                let mut qs = QuizState::new(all_words, *app.infinite_mode.read());
+                                let mut qs = QuizState::new(all_words, *app.infinite_mode.read(), app.fsrs_config.cloned());
                                 if !qs.gen_question() {
                                     push_toast(app, "無法產生題目（無有效單字）");
                                     fetching.set(false);
@@ -766,41 +800,69 @@ fn UploadScreen() -> Element {
                     span { class: "settings-topbar-title", "設定" }
                     button {
                         class: "settings-topbar-btn",
+                        title: "還原預設值",
+                        onclick: move |_| {
+                            app.fsrs_config.set(FsrsConfig::default());
+                            app.is_dark.set(false);
+                            app.infinite_mode.set(true);
+                        },
+                        span { class: "material-symbols-outlined", "restart_alt" }
+                    }
+                    button {
+                        class: "settings-topbar-btn",
                         title: "開源許可證",
                         onclick: move |_| show_licenses.set(true),
                         span { class: "material-symbols-outlined", "description" }
                     }
                 }
-                div { class: "settings-body",
-                    div {
-                        class: "settings-item",
-                        onclick: move |_| {
-                            let new_val = !*app.is_dark.read();
-                            app.is_dark.set(new_val);
-                        },
-                        div { class: "settings-item-icon",
-                            span { class: "material-symbols-outlined",
-                                if *app.is_dark.read() { "dark_mode" } else { "light_mode" }
+                div { class: "settings-tabs",
+                    button {
+                        class: if *settings_tab.read() == 0 { "settings-tab active" } else { "settings-tab" },
+                        onclick: move |_| settings_tab.set(0),
+                        "一般"
+                    }
+                    button {
+                        class: if *settings_tab.read() == 1 { "settings-tab active" } else { "settings-tab" },
+                        onclick: move |_| settings_tab.set(1),
+                        "FSRS"
+                    }
+                }
+                if *settings_tab.read() == 0 {
+                    div { class: "settings-body",
+                        div {
+                            class: "settings-item",
+                            onclick: move |_| {
+                                let new_val = !*app.is_dark.read();
+                                app.is_dark.set(new_val);
+                            },
+                            div { class: "settings-item-icon",
+                                span { class: "material-symbols-outlined",
+                                    if *app.is_dark.read() { "dark_mode" } else { "light_mode" }
+                                }
+                            }
+                            div { class: "settings-item-label", "深色主題" }
+                            div {
+                                class: if *app.is_dark.read() { "settings-switch on" } else { "settings-switch" },
                             }
                         }
-                        div { class: "settings-item-label", "深色主題" }
                         div {
-                            class: if *app.is_dark.read() { "settings-switch on" } else { "settings-switch" },
+                            class: "settings-item",
+                            onclick: move |_| {
+                                let new_val = !*app.infinite_mode.read();
+                                app.infinite_mode.set(new_val);
+                            },
+                            div { class: "settings-item-icon",
+                                span { class: "material-symbols-outlined", "all_inclusive" }
+                            }
+                            div { class: "settings-item-label", "無限考試" }
+                            div {
+                                class: if *app.infinite_mode.read() { "settings-switch on" } else { "settings-switch" },
+                            }
                         }
                     }
-                    div {
-                        class: "settings-item",
-                        onclick: move |_| {
-                            let new_val = !*app.infinite_mode.read();
-                            app.infinite_mode.set(new_val);
-                        },
-                        div { class: "settings-item-icon",
-                            span { class: "material-symbols-outlined", "all_inclusive" }
-                        }
-                        div { class: "settings-item-label", "無限考試" }
-                        div {
-                            class: if *app.infinite_mode.read() { "settings-switch on" } else { "settings-switch" },
-                        }
+                } else {
+                    div { class: "settings-body",
+                        FsrsSettings {}
                     }
                 }
                 div { class: "settings-bottom",
@@ -825,7 +887,7 @@ fn UploadScreen() -> Element {
                             }
                         }
                     }
-                    span { class: "settings-version", "v1.0" }
+                    span { class: "settings-version", "v1.1" }
                 }
             }
         }
@@ -1078,24 +1140,25 @@ fn QuizScreen() -> Element {
             Some(qs) => {
                 let ok = qs.history.iter().filter(|h| h.answered && !h.skipped && h.selected_idx == Some(h.correct_opt)).count();
                 let ko = qs.history.iter().filter(|h| h.answered && !h.skipped && h.selected_idx != Some(h.correct_opt)).count();
-                (ok, ko, qs.review.len())
+                (ok, ko, ko)
             }
             None => (0, 0, 0),
         }
     };
 
     rsx! {
-        button {
-            class: "top-icon-btn",
-            style: "right: 20px;",
-            onclick: move |_| show_pause.set(true),
-            span { class: "material-symbols-outlined", "pause" }
-        }
-        section {
-            class: "quiz-container",
-            tabindex: "0",
-            aria_label: "單字測驗區域",
-            onkeydown: move |e: KeyboardEvent| {
+        div { class: "quiz-screen",
+            button {
+                class: "top-icon-btn",
+                style: "right: 20px;",
+                onclick: move |_| show_pause.set(true),
+                span { class: "material-symbols-outlined", "pause" }
+            }
+            section {
+                class: "quiz-container",
+                tabindex: "0",
+                aria_label: "單字測驗區域",
+                onkeydown: move |e: KeyboardEvent| {
                 let mut guard = app.quiz.write();
                 let qs = match guard.as_mut() {
                     Some(qs) => qs,
@@ -1136,6 +1199,8 @@ fn QuizScreen() -> Element {
             QuestionDisplay {}
             OptionsList {}
             ControlButtons {}
+        }
+        FsrsRatingBar {}
         }
         if *show_pause.read() {
             div { class: "pause-overlay",
@@ -1332,6 +1397,181 @@ fn ControlButtons() -> Element {
                     }
                 },
                 span { class: "material-symbols-outlined", "navigate_next" } " 下一題"
+            }
+        }
+    }
+}
+
+#[component]
+fn FsrsSettings() -> Element {
+    let mut app = use_context::<AppSignals>();
+    let cfg = app.fsrs_config.cloned();
+
+    // Local state for validation
+    let hard_err: Signal<String> = use_signal(String::new);
+    let good_err: Signal<String> = use_signal(String::new);
+    let easy_err: Signal<String> = use_signal(String::new);
+
+    rsx! {
+        div {
+            class: "settings-item",
+            onclick: move |_| {
+                let mut c = app.fsrs_config.cloned();
+                c.enabled = !c.enabled;
+                app.fsrs_config.set(c);
+            },
+            div { class: "settings-item-icon",
+                span { class: "material-symbols-outlined", "psychology" }
+            }
+            div { class: "settings-item-label",
+                div { "FSRS 間隔重複" }
+                div { class: "settings-item-sub", "啟用 FSRS-6 演算法安排複習" }
+            }
+            div {
+                class: if cfg.enabled { "settings-switch on" } else { "settings-switch" },
+            }
+        }
+        div { class: "fsrs-threshold-section",
+            div { class: "fsrs-threshold-header", "判定時間設定 (毫秒)" }
+            div { class: "fsrs-threshold-grid",
+                FsrsThresholdInput {
+                    field: "easy",
+                    label: "簡單",
+                    value: cfg.easy_threshold_ms,
+                    err: easy_err,
+                }
+                FsrsThresholdInput {
+                    field: "good",
+                    label: "良好",
+                    value: cfg.good_threshold_ms,
+                    err: good_err,
+                }
+                FsrsThresholdInput {
+                    field: "hard",
+                    label: "困難",
+                    value: cfg.hard_threshold_ms,
+                    err: hard_err,
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn FsrsThresholdInput(field: String, label: String, value: u64, mut err: Signal<String>) -> Element {
+    let mut app = use_context::<AppSignals>();
+    let input_id = format!("fsrs-{field}");
+    let has_err = !err.read().is_empty();
+    let input_cls = format!("fsrs-input{}", if has_err { " error" } else { "" });
+
+    rsx! {
+        div { class: "fsrs-field",
+            label {
+                class: "fsrs-label",
+                r#for: "{input_id}",
+                "{label}"
+            }
+            input {
+                id: "{input_id}",
+                class: "{input_cls}",
+                r#type: "number",
+                min: "1",
+                value: "{value}",
+                placeholder: "毫秒",
+                oninput: move |e| {
+                    let v = e.value().trim().to_string();
+                    if v.is_empty() {
+                        err.set(String::new());
+                        return;
+                    }
+                    match v.parse::<u64>() {
+                        Ok(n) if n > 0 => {
+                            let mut c = app.fsrs_config.cloned();
+                            match field.as_str() {
+                                "good" if n <= c.easy_threshold_ms => {
+                                    err.set("值必須大於 簡單".to_string());
+                                    return;
+                                }
+                                "hard" if n <= c.good_threshold_ms => {
+                                    err.set("值必須大於 良好".to_string());
+                                    return;
+                                }
+                                "hard" => c.hard_threshold_ms = n,
+                                "good" => c.good_threshold_ms = n,
+                                "easy" => c.easy_threshold_ms = n,
+                                _ => {}
+                            }
+                            err.set(String::new());
+                            app.fsrs_config.set(c);
+                        }
+                        _ => {
+                            err.set("請輸入正數".to_string());
+                        }
+                    }
+                },
+            }
+            {has_err.then(|| rsx! {
+                div { class: "fsrs-error", "{err.read().clone()}" }
+            })}
+        }
+    }
+}
+
+#[component]
+fn FsrsRatingBar() -> Element {
+    let mut app = use_context::<AppSignals>();
+
+    let (show, current_rating) = {
+        let qs = app.quiz.read();
+        let Some(qs) = qs.as_ref() else {
+            return rsx! { div {} };
+        };
+        let Some(q) = qs.current_question() else {
+            return rsx! { div {} };
+        };
+        let show = q.answered;
+        let r = if show { q.rating() } else { None };
+        (show, r)
+    };
+
+    if !show {
+        return rsx! { div {} };
+    }
+
+    let ratings = [
+        (FsrsRating::Again, "fsrs-btn-again"),
+        (FsrsRating::Hard, "fsrs-btn-hard"),
+        (FsrsRating::Good, "fsrs-btn-good"),
+        (FsrsRating::Easy, "fsrs-btn-easy"),
+    ];
+
+    rsx! {
+        div { class: "rating-section",
+            div { class: "rating-label", "評分" }
+            div { class: "fsrs-rating-row",
+                {ratings.into_iter().map(|(r, cls_name)| {
+                    let selected = current_rating == Some(r);
+                    let cls = format!(
+                        "fsrs-rating-btn {} {}",
+                        cls_name,
+                        if selected { "selected" } else { "" }
+                    );
+                    rsx! {
+                        button {
+                            class: "{cls}",
+                            onclick: move |_| {
+                                let mut guard = app.quiz.write();
+                                if let Some(qs) = guard.as_mut() {
+                                    qs.set_rating(r);
+                                }
+                            },
+                            if selected {
+                                span { class: "material-symbols-outlined", "check" }
+                            }
+                            span { "{r.label()}" }
+                        }
+                    }
+                })}
             }
         }
     }

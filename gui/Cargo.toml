@@ -1,6 +1,6 @@
 [package]
 name = "scallion-vocab"
-version = "0.1.0"
+version = "1.1.0"
 edition = "2021"
 
 [dependencies]
@@ -12,6 +12,7 @@ log = "0.4"
 url = "2"
 percent-encoding = "2"
 fastrand = "2"
+fsrs = "6"
 tokio = { version = "1", features = ["time"] }
 
 # --- Quizlet scraper library ---
