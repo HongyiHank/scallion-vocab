@@ -116,7 +116,7 @@ class MainActivity : WryActivity() {
 
                 handler.postDelayed({
                     if (!resultSent) sendResult("''")
-                }, 15000)
+                }, 20000)
             }
         }
 
