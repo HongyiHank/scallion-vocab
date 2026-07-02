@@ -340,11 +340,12 @@ fn decode_anki_cell(input: &str) -> String {
         .replace("<br />", "\n")
         .replace("<br/>", "\n")
         .replace("<br>", "\n")
+        // &amp; must be first so double-encoded entities decode correctly
+        .replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
-        .replace("&amp;", "&")
         .trim()
         .to_string()
 }
