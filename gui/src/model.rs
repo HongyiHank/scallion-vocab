@@ -210,10 +210,20 @@ impl QuizState {
                 None => self.pick_new(),
             }
         } else {
-            if self.unseen.is_empty() {
-                return false;
+            // Check review queue first (same as infinite), fall back to unseen
+            match self
+                .review
+                .iter()
+                .position(|r| self.history.len() >= r.due_after)
+            {
+                Some(idx) => self.review.remove(idx).word_idx,
+                None => {
+                    if self.unseen.is_empty() {
+                        return false;
+                    }
+                    self.unseen.pop().unwrap_or(0)
+                }
             }
-            self.unseen.pop().unwrap_or(0)
         };
 
         // 構建選項：target + 其他不重複且不同英文的單字
@@ -256,7 +266,10 @@ impl QuizState {
     }
 
     pub fn has_more(&self) -> bool {
-        self.infinite || self.current + 1 < self.history.len() || !self.unseen.is_empty()
+        self.infinite
+            || self.current + 1 < self.history.len()
+            || !self.unseen.is_empty()
+            || self.review.iter().any(|r| self.history.len() >= r.due_after)
     }
 
     // FSRS-based review scheduling
@@ -295,7 +308,7 @@ impl QuizState {
 
         let due_after = self.history.len().saturating_sub(1) + offset;
         if let Some(existing) = self.review.iter_mut().find(|r| r.word_idx == word_idx) {
-            existing.due_after = existing.due_after.min(due_after);
+            existing.due_after = due_after;
         } else {
             self.review.push(ReviewItem { word_idx, due_after });
         }
@@ -307,7 +320,7 @@ impl QuizState {
         let due_after = self.history.len().saturating_sub(1) + offset;
 
         if let Some(existing) = self.review.iter_mut().find(|r| r.word_idx == word_idx) {
-            existing.due_after = existing.due_after.min(due_after);
+            existing.due_after = due_after;
         } else {
             self.review.push(ReviewItem { word_idx, due_after });
         }
