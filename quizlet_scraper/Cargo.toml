@@ -1,7 +1,7 @@
 [package]
 name = "quizlet_scraper"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "A minimal, embeddable Quizlet flashcard scraper (term/definition only)."
 license = "MIT"
 publish = false
