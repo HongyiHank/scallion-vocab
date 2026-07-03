@@ -725,6 +725,7 @@ button.history-item:active { transform: scale(0.98); }
 }
 .settings-github-icon {
     width: 40px; height: 40px; border-radius: 50%;
+    border: none; background: transparent;
     display: flex; align-items: center; justify-content: center;
     color: var(--md-sys-color-on-surface-variant);
     cursor: pointer; text-decoration: none;

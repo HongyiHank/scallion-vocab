@@ -243,9 +243,9 @@ async fn persist_fsrs_config(cfg: FsrsConfig) {
 }
 
 async fn persist_infinite_mode(infinite: bool) {
-    let val = if infinite { "true" } else { "false" };
+    let val = serde_json::to_string(&infinite).unwrap_or_else(|_| "false".to_string());
     let script = format!(
-        r#"try {{ localStorage.setItem('infinite_mode', '{val}'); }} catch (_) {{}}"#
+        r#"try {{ localStorage.setItem('infinite_mode', {val}); }} catch (_) {{}}"#
     );
     if let Err(e) = document::eval(&script).await {
         log!("[Prefs::InfiniteMode] save failed: {e}");
@@ -333,7 +333,7 @@ fn format_url_title(url: &str) -> String {
             let mut chars = word.chars();
             match chars.next() {
                 None => String::new(),
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
             }
         })
         .collect::<Vec<_>>()
@@ -579,17 +579,17 @@ fn UploadScreen() -> Element {
             html_error.set(String::new());
             let url = html_fallback_url.read().clone();
             log!("[Upload::HtmlFallback] starting import: {} bytes", html.len());
-                    match scrape_words_from_html(&html) {
-                        Ok((words, title)) => {
-                            log!("[Upload::HtmlFallback] success: {} words, title='{}'", words.len(), title);
-                            let mut qs = QuizState::new(words, *app.infinite_mode.read(), app.fsrs_config.cloned());
-                            if !qs.gen_question() {
-                                html_error.set("無法產生題目（無有效單字）".to_string());
-                                html_loading.set(false);
-                                return;
-                            }
-                            app.quiz.set(Some(qs));
-                            app.screen.set(Screen::Quiz);
+            match scrape_words_from_html(&html) {
+                Ok((words, title)) => {
+                    log!("[Upload::HtmlFallback] success: {} words, title='{}'", words.len(), title);
+                    let mut qs = QuizState::new(words, *app.infinite_mode.read(), app.fsrs_config.cloned());
+                    if !qs.gen_question() {
+                        html_error.set("無法產生題目（無有效單字）".to_string());
+                        html_loading.set(false);
+                        return;
+                    }
+                    app.quiz.set(Some(qs));
+                    app.screen.set(Screen::Quiz);
                     if let Some(u) = normalize_quizlet_url(&url) {
                         let mut recent = app.recent_urls.cloned();
                         recent.retain(|x| x != &u);
@@ -619,7 +619,7 @@ fn UploadScreen() -> Element {
 
     let recent_urls = app.recent_urls.cloned();
 
-    let show_detail = selected_dep_name.read().is_empty() == false;
+    let show_detail = !selected_dep_name.read().is_empty();
     let detail_name = match show_detail {
         true => selected_dep_name.read().clone(),
         false => String::new(),
@@ -935,9 +935,8 @@ fn UploadScreen() -> Element {
                     }
                 }
                 div { class: "settings-bottom",
-                    a {
+                    button {
                         class: "settings-github-icon",
-                        href: "#",
                         title: "GitHub 原始碼",
                         onclick: move |_| {
                             let js = r#"(function(){
