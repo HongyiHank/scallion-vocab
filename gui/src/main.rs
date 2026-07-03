@@ -848,6 +848,9 @@ fn UploadScreen() -> Element {
                                 class: if *app.is_dark.read() { "settings-switch on" } else { "settings-switch" },
                             }
                         }
+                    }
+                } else if *settings_tab.read() == 1 {
+                    div { class: "settings-body",
                         div {
                             class: "settings-item",
                             onclick: move |_| {
@@ -862,9 +865,6 @@ fn UploadScreen() -> Element {
                                 class: if *app.infinite_mode.read() { "settings-switch on" } else { "settings-switch" },
                             }
                         }
-                    }
-                } else if *settings_tab.read() == 1 {
-                    div { class: "settings-body",
                         div {
                             class: "settings-item",
                             onclick: move |_| {
