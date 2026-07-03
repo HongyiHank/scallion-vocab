@@ -139,7 +139,7 @@ fn android_write(level: log::Level, msg: &str) {
     let tag = CString::new("ScallionVocab").unwrap_or_default();
     let text = CString::new(msg).unwrap_or_default();
 
-    extern "C" {
+    unsafe extern "C" {
         fn __android_log_write(
             prio: i32,
             tag: *const std::ffi::c_char,
