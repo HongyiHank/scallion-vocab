@@ -1252,7 +1252,7 @@ fn QuizScreen() -> Element {
             OptionsList {}
             ControlButtons {}
         }
-        if app.fsrs_config.read().enabled {
+        if app.fsrs_config.read().enabled && app.fsrs_config.read().manual_rating {
             FsrsRatingBar {}
         }
         }
@@ -1486,6 +1486,24 @@ fn FsrsSettings() -> Element {
             }
             div {
                 class: if cfg.enabled { "settings-switch on" } else { "settings-switch" },
+            }
+        }
+        div {
+            class: "settings-item",
+            onclick: move |_| {
+                let mut c = app.fsrs_config.cloned();
+                c.manual_rating = !c.manual_rating;
+                app.fsrs_config.set(c);
+            },
+            div { class: "settings-item-icon",
+                span { class: "material-symbols-outlined", "rate_review" }
+            }
+            div { class: "settings-item-label",
+                div { "手動評分" }
+                div { class: "settings-item-sub", "作答後顯示評分按鈕，關閉則自動評分" }
+            }
+            div {
+                class: if cfg.manual_rating { "settings-switch on" } else { "settings-switch" },
             }
         }
         div { class: "fsrs-threshold-section",

@@ -62,10 +62,14 @@ fn fsrs_stability_to_offset(stability_days: f32) -> usize {
     (REVIEW_LO + offset).max(REVIEW_LO)
 }
 
+fn default_true() -> bool { true }
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FsrsConfig {
     pub enabled: bool,
     pub review_wrong: bool,
+    #[serde(default = "default_true")]
+    pub manual_rating: bool,
     pub hard_threshold_ms: u64,
     pub good_threshold_ms: u64,
     pub easy_threshold_ms: u64,
@@ -76,6 +80,7 @@ impl Default for FsrsConfig {
         Self {
             enabled: true,
             review_wrong: true,
+            manual_rating: true,
             hard_threshold_ms: 10000,
             good_threshold_ms: 6000,
             easy_threshold_ms: 3000,
