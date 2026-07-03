@@ -663,6 +663,7 @@ button.history-item:active { transform: scale(0.98); }
 @media (hover: hover) {
     .settings-topbar-btn:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
 }
+.settings-topbar-btn:active { background: color-mix(in srgb, var(--md-sys-color-primary) 20%, transparent); }
 .settings-close {
     width: 40px; height: 40px; border: none; border-radius: 50%;
     background: transparent; color: var(--md-sys-color-on-surface);

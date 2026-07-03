@@ -824,6 +824,7 @@ fn UploadScreen() -> Element {
                             app.fsrs_config.set(FsrsConfig::default());
                             app.is_dark.set(false);
                             app.infinite_mode.set(true);
+                            push_toast(app, "已還原預設值");
                         },
                         span { class: "material-symbols-outlined", "restart_alt" }
                     }
