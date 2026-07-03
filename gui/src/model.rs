@@ -63,6 +63,7 @@ fn fsrs_stability_to_offset(stability_days: f32) -> usize {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FsrsConfig {
     pub enabled: bool,
+    pub review_wrong: bool,
     pub hard_threshold_ms: u64,
     pub good_threshold_ms: u64,
     pub easy_threshold_ms: u64,
@@ -72,6 +73,7 @@ impl Default for FsrsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            review_wrong: true,
             hard_threshold_ms: 10000,
             good_threshold_ms: 6000,
             easy_threshold_ms: 3000,
@@ -339,10 +341,12 @@ impl QuizState {
 
         if !is_correct {
             // Wrong answer: schedule review with FSRS or fallback
-            if self.fsrs_config.enabled {
-                self.schedule_review_fsrs(target_idx, rating);
-            } else {
-                self.schedule_review(target_idx);
+            if self.fsrs_config.review_wrong {
+                if self.fsrs_config.enabled {
+                    self.schedule_review_fsrs(target_idx, rating);
+                } else {
+                    self.schedule_review(target_idx);
+                }
             }
         } else {
             // Correct answer: schedule review with FSRS (or not at all for fallback)

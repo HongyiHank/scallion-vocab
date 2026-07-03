@@ -389,7 +389,7 @@ fn UploadScreen() -> Element {
     let mut show_licenses = use_signal(|| false);
     let mut selected_dep_name = use_signal(String::new);
     let mut selected_dep_license = use_signal(String::new);
-    let mut settings_tab = use_signal(|| 0); // 0 = 一般, 1 = FSRS
+    let mut settings_tab = use_signal(|| 0); // 0 = 一般, 1 = 考試, 2 = FSRS
     let auto_resize_textarea = move || {
         spawn(async move {
             let _ = document::eval(
@@ -817,6 +817,11 @@ fn UploadScreen() -> Element {
                     button {
                         class: if *settings_tab.read() == 1 { "settings-tab active" } else { "settings-tab" },
                         onclick: move |_| settings_tab.set(1),
+                        "考試"
+                    }
+                    button {
+                        class: if *settings_tab.read() == 2 { "settings-tab active" } else { "settings-tab" },
+                        onclick: move |_| settings_tab.set(2),
                         "FSRS"
                     }
                 }
@@ -850,6 +855,27 @@ fn UploadScreen() -> Element {
                             div { class: "settings-item-label", "無限考試" }
                             div {
                                 class: if *app.infinite_mode.read() { "settings-switch on" } else { "settings-switch" },
+                            }
+                        }
+                    }
+                } else if *settings_tab.read() == 1 {
+                    div { class: "settings-body",
+                        div {
+                            class: "settings-item",
+                            onclick: move |_| {
+                                let mut c = app.fsrs_config.cloned();
+                                c.review_wrong = !c.review_wrong;
+                                app.fsrs_config.set(c);
+                            },
+                            div { class: "settings-item-icon",
+                                span { class: "material-symbols-outlined", "refresh" }
+                            }
+                            div { class: "settings-item-label",
+                                div { "重複出現錯題" }
+                                div { class: "settings-item-sub", "關閉時錯題不加入複習佇列，優先於 FSRS 設定" }
+                            }
+                            div {
+                                class: if app.fsrs_config.read().review_wrong { "settings-switch on" } else { "settings-switch" },
                             }
                         }
                     }
