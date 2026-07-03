@@ -519,9 +519,7 @@ fn UploadScreen() -> Element {
 
     let open_fallback_page = move |_| {
         let url = html_fallback_url.read().trim().to_string();
-        if url.is_empty() {
-            return;
-        }
+        let Some(url) = normalize_quizlet_url(&url) else { return };
         spawn(async move {
             let url_js = serde_json::to_string(&url).unwrap_or_else(|_| "\"\"".to_string());
             let js = format!(
