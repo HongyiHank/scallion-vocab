@@ -70,44 +70,21 @@ fn App() -> Element {
         });
     });
 
+    // 單一 effect 訂閱所有持久化信號，減少重複 prefs_loaded guard
     use_effect(move || {
         if !*app.prefs_loaded.read() {
             return;
         }
 
         let is_dark = *app.is_dark.read();
+        let infinite = *app.infinite_mode.read();
+        let cfg = app.fsrs_config.cloned();
+        let ms = *app.auto_advance_ms.read();
 
         spawn(async move {
             persist_theme(is_dark).await;
-        });
-    });
-
-    use_effect(move || {
-        let infinite = *app.infinite_mode.read();
-        if !*app.prefs_loaded.read() {
-            return;
-        }
-        spawn(async move {
             persist_infinite_mode(infinite).await;
-        });
-    });
-
-    use_effect(move || {
-        let cfg = app.fsrs_config.cloned();
-        if !*app.prefs_loaded.read() {
-            return;
-        }
-        spawn(async move {
             persist_fsrs_config(cfg).await;
-        });
-    });
-
-    use_effect(move || {
-        let ms = *app.auto_advance_ms.read();
-        if !*app.prefs_loaded.read() {
-            return;
-        }
-        spawn(async move {
             persist_auto_advance_ms(ms).await;
         });
     });
