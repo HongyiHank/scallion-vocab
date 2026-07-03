@@ -17,3 +17,9 @@ tokio = { version = "1", features = ["time"] }
 
 # --- Quizlet scraper library ---
 quizlet_scraper = { path = "../quizlet_scraper" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
