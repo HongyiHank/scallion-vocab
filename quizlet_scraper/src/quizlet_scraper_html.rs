@@ -237,15 +237,15 @@ fn map_single_item(item: &Value) -> Option<Flashcard> {
             .iter()
             .find(|m| m.get("type").and_then(Value::as_i64) == Some(1))
             .and_then(parse_text_item);
-        if text.is_none() {
+        let Some(text) = text else {
             continue;
-        }
+        };
         match label {
             "word" => {
-                term.get_or_insert(text.unwrap());
+                term.get_or_insert(text);
             }
             "definition" => {
-                definition.get_or_insert(text.unwrap());
+                definition.get_or_insert(text);
             }
             _ => {}
         }
