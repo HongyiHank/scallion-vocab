@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 const MAX_RECENT_URLS: usize = 5;
 const TOAST_DURATION_MS: u64 = 2_800;
-const AUTO_ADVANCE_MS: u64 = 1_500;
+const DEFAULT_AUTO_ADVANCE_MS: i64 = 1_000;
 const FILE_DIALOG_TIMEOUT_MS: u64 = 60_000;
 const ANTI_FOUC_SCRIPT: &str = "try{document.documentElement.setAttribute('data-theme',localStorage.getItem('theme')||'light')}catch(_){}";
 
@@ -32,6 +32,7 @@ struct AppSignals {
     toast_seq: Signal<u64>,
     is_dark: Signal<bool>,
     infinite_mode: Signal<bool>,
+    auto_advance_ms: Signal<i64>,
     fsrs_config: Signal<FsrsConfig>,
     prefs_loaded: Signal<bool>,
     recent_urls: Signal<Vec<String>>,
@@ -55,6 +56,7 @@ fn App() -> Element {
         toast_seq: Signal::new(0),
         is_dark: Signal::new(false),
         infinite_mode: Signal::new(true),
+        auto_advance_ms: Signal::new(DEFAULT_AUTO_ADVANCE_MS),
         fsrs_config: Signal::new(FsrsConfig::default()),
         prefs_loaded: Signal::new(false),
         recent_urls: Signal::new(Vec::new()),
@@ -97,6 +99,16 @@ fn App() -> Element {
         }
         spawn(async move {
             persist_fsrs_config(cfg).await;
+        });
+    });
+
+    use_effect(move || {
+        let ms = *app.auto_advance_ms.read();
+        if !*app.prefs_loaded.read() {
+            return;
+        }
+        spawn(async move {
+            persist_auto_advance_ms(ms).await;
         });
     });
 
@@ -150,6 +162,7 @@ struct StoredPrefs {
     theme: String,
     urls: Vec<String>,
     infinite_mode: Option<bool>,
+    auto_advance_ms: Option<i64>,
     fsrs_config: Option<String>,
 }
 
@@ -161,11 +174,12 @@ async fn load_prefs(mut app: AppSignals) {
             document.documentElement.setAttribute('data-theme', theme);
             const urls = JSON.parse(localStorage.getItem('recent_urls') || '[]');
             const infinite_mode = localStorage.getItem('infinite_mode') !== 'false';
+            const auto_advance_ms = parseInt(localStorage.getItem('auto_advance_ms'), 10) || null;
             const fsrs_config = localStorage.getItem('fsrs_config') || '';
-            dioxus.send(JSON.stringify({ theme, urls: Array.isArray(urls) ? urls : [], infinite_mode, fsrs_config }));
+            dioxus.send(JSON.stringify({ theme, urls: Array.isArray(urls) ? urls : [], infinite_mode, auto_advance_ms, fsrs_config }));
         } catch (_) {
             document.documentElement.setAttribute('data-theme', 'light');
-            dioxus.send(JSON.stringify({ theme: 'light', urls: [], infinite_mode: true, fsrs_config: '' }));
+            dioxus.send(JSON.stringify({ theme: 'light', urls: [], infinite_mode: true, auto_advance_ms: null, fsrs_config: '' }));
         }
         "#,
     );
@@ -174,6 +188,9 @@ async fn load_prefs(mut app: AppSignals) {
         if let Ok(prefs) = serde_json::from_str::<StoredPrefs>(&payload) {
             app.is_dark.set(prefs.theme == "dark");
             app.infinite_mode.set(prefs.infinite_mode.unwrap_or(true));
+            if let Some(v) = prefs.auto_advance_ms {
+                app.auto_advance_ms.set(v);
+            }
             app.recent_urls
                 .set(clean_recent_urls(prefs.urls, MAX_RECENT_URLS));
             if let Some(json) = prefs.fsrs_config {
@@ -232,6 +249,15 @@ async fn persist_infinite_mode(infinite: bool) {
     );
     if let Err(e) = document::eval(&script).await {
         log!("[Prefs::InfiniteMode] save failed: {e}");
+    }
+}
+
+async fn persist_auto_advance_ms(ms: i64) {
+    let js = format!(
+        r#"try {{ localStorage.setItem('auto_advance_ms', '{ms}'); }} catch (_) {{}}"#
+    );
+    if let Err(e) = document::eval(&js).await {
+        log!("[Prefs::AutoAdvanceMs] save failed: {e}");
     }
 }
 
@@ -878,6 +904,29 @@ fn UploadScreen() -> Element {
                                 class: if app.fsrs_config.read().review_wrong { "settings-switch on" } else { "settings-switch" },
                             }
                         }
+                        div {
+                            class: "settings-item",
+                            style: "cursor: default;",
+                            div { class: "settings-item-icon",
+                                span { class: "material-symbols-outlined", "timer" }
+                            }
+                            div { class: "settings-item-label",
+                                div { "自動跳題時間" }
+                                div { class: "settings-item-sub", "設為負數則關閉" }
+                            }
+                            input {
+                                class: "fsrs-input",
+                                style: "width: 100px; flex-shrink: 0; text-align: right;",
+                                r#type: "number",
+                                value: "{app.auto_advance_ms.read()}",
+                                oninput: move |e| {
+                                    let v = e.value().trim().to_string();
+                                    if let Ok(n) = v.parse::<i64>() {
+                                        app.auto_advance_ms.set(n);
+                                    }
+                                },
+                            }
+                        }
                     }
                 } else {
                     div { class: "settings-body",
@@ -1117,6 +1166,7 @@ fn QuizScreen() -> Element {
 
     // auto-advance after answering the last question
     use_effect(move || {
+        let auto_ms = *app.auto_advance_ms.read();
         let (is_answered, is_last, current_idx) = {
             let qs = app.quiz.read();
             let qs = match qs.as_ref() {
@@ -1135,10 +1185,11 @@ fn QuizScreen() -> Element {
             if !has_more {
                 return;
             }
+            if auto_ms < 0 { return; }
             if !auto_armed() {
                 auto_armed.set(true);
                 spawn(async move {
-                    sleep_ms(AUTO_ADVANCE_MS).await;
+                    sleep_ms(auto_ms as u64).await;
                     let mut guard = app.quiz.write();
                     if let Some(qs) = guard.as_mut() {
                         if qs.current == current_idx {
