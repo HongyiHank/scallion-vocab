@@ -320,7 +320,7 @@ impl QuizState {
         let due_after = self.history.len().saturating_sub(1) + offset;
 
         if let Some(existing) = self.review.iter_mut().find(|r| r.word_idx == word_idx) {
-            existing.due_after = due_after;
+            existing.due_after = existing.due_after.min(due_after);
         } else {
             self.review.push(ReviewItem { word_idx, due_after });
         }
