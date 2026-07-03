@@ -901,6 +901,7 @@ fn UploadScreen() -> Element {
                                 value: "{app.auto_advance_ms.read()}",
                                 oninput: move |e| {
                                     let v = e.value().trim().to_string();
+                                    if v.is_empty() { return; }
                                     if let Ok(n) = v.parse::<i64>() {
                                         app.auto_advance_ms.set(n);
                                     }
@@ -1539,6 +1540,11 @@ fn FsrsThresholdInput(field: String, label: String, value: u64, mut err: Signal<
     let input_id = format!("fsrs-{field}");
     let has_err = !err.read().is_empty();
     let input_cls = format!("fsrs-input{}", if has_err { " error" } else { "" });
+    let mut text: Signal<String> = use_signal(|| value.to_string());
+    use_effect(move || {
+        let _ = value;
+        text.set(value.to_string());
+    });
 
     rsx! {
         div { class: "fsrs-field",
@@ -1551,37 +1557,45 @@ fn FsrsThresholdInput(field: String, label: String, value: u64, mut err: Signal<
                 id: "{input_id}",
                 class: "{input_cls}",
                 r#type: "number",
-                min: "1",
-                value: "{value}",
+                value: "{text.read()}",
                 placeholder: "毫秒",
                 oninput: move |e| {
                     let v = e.value().trim().to_string();
-                    if v.is_empty() {
-                        err.set(String::new());
+                    text.set(v.clone());
+                    if v.is_empty() || v.parse::<u64>().is_ok_and(|n| n == 0) {
+                        err.set("請輸入自然數".to_string());
                         return;
                     }
                     match v.parse::<u64>() {
                         Ok(n) if n > 0 => {
                             let mut c = app.fsrs_config.cloned();
                             match field.as_str() {
+                                "easy" if n >= c.good_threshold_ms => {
+                                    err.set("值必須小於 良好".to_string());
+                                    return;
+                                }
+                                "easy" => c.easy_threshold_ms = n,
                                 "good" if n <= c.easy_threshold_ms => {
                                     err.set("值必須大於 簡單".to_string());
                                     return;
                                 }
+                                "good" if n >= c.hard_threshold_ms => {
+                                    err.set("值必須小於 困難".to_string());
+                                    return;
+                                }
+                                "good" => c.good_threshold_ms = n,
                                 "hard" if n <= c.good_threshold_ms => {
                                     err.set("值必須大於 良好".to_string());
                                     return;
                                 }
                                 "hard" => c.hard_threshold_ms = n,
-                                "good" => c.good_threshold_ms = n,
-                                "easy" => c.easy_threshold_ms = n,
                                 _ => {}
                             }
                             err.set(String::new());
                             app.fsrs_config.set(c);
                         }
                         _ => {
-                            err.set("請輸入正數".to_string());
+                            err.set("請輸入自然數".to_string());
                         }
                     }
                 },
