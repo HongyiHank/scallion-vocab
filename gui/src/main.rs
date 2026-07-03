@@ -122,6 +122,7 @@ fn App() -> Element {
             match screen {
                 Screen::Upload => rsx! { UploadScreen {} },
                 Screen::Quiz => rsx! { QuizScreen {} },
+                Screen::QuizFinished => rsx! { QuizFinished {} },
             }
         }
 
@@ -1160,6 +1161,7 @@ fn QuizScreen() -> Element {
         if is_answered && is_last {
             let has_more = app.quiz.read().as_ref().is_some_and(|qs| qs.has_more());
             if !has_more {
+                app.screen.set(Screen::QuizFinished);
                 return;
             }
             if auto_ms < 0 { return; }
@@ -1230,7 +1232,10 @@ fn QuizScreen() -> Element {
                             _ => {}
                         }
                     }
-                    Key::ArrowRight | Key::Enter if answered => { qs.next(); }
+                    Key::ArrowRight | Key::Enter if answered => {
+                        qs.next();
+                        if !qs.has_more() { app.screen.set(Screen::QuizFinished); }
+                    }
                     Key::ArrowLeft if qs.current > 0 => { qs.prev(); }
                     _ => {}
                 }
@@ -1440,10 +1445,13 @@ fn ControlButtons() -> Element {
                 class: "ctrl-btn filled",
                 disabled: !answered,
                 onclick: move |_| {
-                    let mut guard = app.quiz.write();
-                    if let Some(qs) = guard.as_mut() {
+                    let done = {
+                        let mut guard = app.quiz.write();
+                        let Some(qs) = guard.as_mut() else { return };
                         qs.next();
-                    }
+                        !qs.has_more()
+                    };
+                    if done { app.screen.set(Screen::QuizFinished); }
                 },
                 span { class: "material-symbols-outlined", "navigate_next" } " 下一題"
             }
@@ -1621,6 +1629,58 @@ fn FsrsRatingBar() -> Element {
                         }
                     }
                 })}
+            }
+        }
+    }
+}
+
+#[component]
+fn QuizFinished() -> Element {
+    let mut app = use_context::<AppSignals>();
+
+    let (correct, wrong) = {
+        let qs = app.quiz.read();
+        let qs = match qs.as_ref() {
+            Some(qs) => qs,
+            None => return rsx! { div {} },
+        };
+        let ok = qs.history.iter().filter(|h| h.answered && !h.skipped && h.selected_idx == Some(h.correct_opt)).count();
+        let ko = qs.history.iter().filter(|h| h.answered && !h.skipped && h.selected_idx != Some(h.correct_opt)).count();
+        (ok, ko)
+    };
+
+    rsx! {
+        div { class: "finish-screen",
+            div { class: "finish-icon",
+                span { class: "material-symbols-outlined", "check_circle" }
+            }
+            div { class: "finish-title", "測驗完成" }
+            div { class: "finish-score",
+                span { class: "correct", "{correct}" } " 題正確　"
+                span { class: "wrong", "{wrong}" } " 題錯誤"
+            }
+            button {
+                class: "finish-btn filled",
+                onclick: move |_| {
+                    let old_words = {
+                        let qs = app.quiz.read();
+                        qs.as_ref().map(|qs| qs.words.clone()).unwrap_or_default()
+                    };
+                    if old_words.is_empty() { return; }
+                    let mut qs = QuizState::new(old_words, *app.infinite_mode.read(), app.fsrs_config.cloned());
+                    qs.gen_question();
+                    app.quiz.set(Some(qs));
+                    app.screen.set(Screen::Quiz);
+                },
+                "再來一次"
+            }
+            button {
+                class: "finish-btn outlined",
+                onclick: move |_| {
+                    app.quiz.set(None);
+                    app.screen.set(Screen::Upload);
+                },
+                "返回主頁"
             }
         }
     }

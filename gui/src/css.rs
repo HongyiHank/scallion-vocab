@@ -979,4 +979,41 @@ button.history-item:active { transform: scale(0.98); }
 .fsrs-error {
     font-size: .75em; color: var(--md-sys-color-error); font-weight: 500;
 }
+
+.finish-screen {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    width: 100%; max-width: 640px; text-align: center;
+    animation: fadeUp var(--md-sys-motion-duration-medium4) var(--md-sys-motion-easing-emphasized-decelerate);
+    gap: 16px; padding: 48px 24px; flex: 1;
+}
+.finish-icon {
+    font-size: 4em; color: var(--md-sys-color-primary);
+    width: 96px; height: 96px; border-radius: 50%;
+    background: var(--md-sys-color-primary-container);
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 8px;
+}
+.finish-title {
+    font-size: 1.6em; font-weight: 600; color: var(--md-sys-color-on-surface);
+}
+.finish-score {
+    font-size: 1em; color: var(--md-sys-color-on-surface-variant);
+    line-height: 1.6; margin-bottom: 24px;
+}
+.finish-score .correct { color: var(--md-sys-color-primary); font-weight: 700; }
+.finish-score .wrong { color: var(--md-sys-color-error); font-weight: 700; }
+.finish-btn {
+    width: 100%; max-width: 360px; padding: 14px 24px; min-height: 48px;
+    border-radius: var(--shape-full);
+    font-size: 1em; font-weight: 500; cursor: pointer; font-family: inherit;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                transform var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.finish-btn:active { transform: scale(0.97); }
+.finish-btn.filled { border: none; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
+.finish-btn.filled:hover { box-shadow: var(--elev-1); }
+.finish-btn.outlined { border: 1px solid var(--md-sys-color-outline); background: transparent; color: var(--md-sys-color-primary); }
+.finish-btn.outlined:hover { background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
 "#;

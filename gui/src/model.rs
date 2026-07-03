@@ -110,6 +110,7 @@ pub struct Word {
 pub enum Screen {
     Upload,
     Quiz,
+    QuizFinished,
 }
 
 #[derive(Clone, Debug)]
