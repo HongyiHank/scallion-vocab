@@ -7,7 +7,9 @@ pub(crate) const REVIEW_HI: usize = 15;
 
 // ── FSRS types ──
 
+// FsrsRating 未實際經 serde 序列化，故不用 serde_repr crate
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[repr(i32)]
 pub enum FsrsRating {
     Again = 1,
     Hard = 2,
