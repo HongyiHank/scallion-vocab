@@ -200,34 +200,23 @@ impl QuizState {
             return false;
         }
 
-        let target = if self.infinite {
-            match self
+        let target = {
+            // review queue 優先
+            if let Some(idx) = self
                 .review
                 .iter()
                 .position(|r| self.history.len() >= r.due_after)
             {
-                Some(idx) => self.review.remove(idx).word_idx,
-                None => self.pick_new(),
-            }
-        } else {
-            // Check review queue first (same as infinite), fall back to unseen
-            match self
-                .review
-                .iter()
-                .position(|r| self.history.len() >= r.due_after)
-            {
-                Some(idx) => self.review.remove(idx).word_idx,
-                None => {
-                    if self.unseen.is_empty() {
-                        return false;
-                    }
-                    self.unseen.pop().unwrap_or(0)
-                }
+                self.review.remove(idx).word_idx
+            } else if self.unseen.is_empty() {
+                if self.infinite { self.pick_new() } else { return false }
+            } else {
+                self.unseen.pop().unwrap_or(0)
             }
         };
 
         // 構建選項：target + 其他不重複且不同英文的單字
-        // ponytail: 排除同 front（英文）的詞，避免同一英文多種中文出現在選項中混淆
+        // 排除同 front（英文）的詞，避免同一英文多種中文出現在選項中混淆
         let target_front = &self.words[target].front;
         let mut opts = vec![target];
         let mut pool: Vec<usize> = (0..self.words.len())
@@ -280,7 +269,7 @@ impl QuizState {
         let prev_memory = if is_new {
             None
         } else {
-            // ponytail: all reviews same-session, elapsed_days = 0
+            // all reviews same-session, elapsed_days = 0
             Some(fsrs::MemoryState { stability: card.stability as f32, difficulty: card.difficulty as f32 })
         };
 
