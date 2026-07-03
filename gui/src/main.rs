@@ -1244,7 +1244,7 @@ fn QuizScreen() -> Element {
                 span { class: "q-correct", "{correct_count}" }
                 span { class: "q-plus", "+" }
                 span { class: "q-wrong", "{wrong_count}" }
-                if review_count > 0 {
+                if review_count > 0 && app.fsrs_config.read().review_wrong {
                     span { class: "badge badge-review", span { class: "material-symbols-outlined", "sync" }, " 待複習 {review_count}" }
                 }
             }
