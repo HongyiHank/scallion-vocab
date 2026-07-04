@@ -1235,12 +1235,7 @@ fn QuizScreen() -> Element {
         if is_answered && is_last {
             let has_more = app.quiz.read().as_ref().is_some_and(|qs| qs.has_more());
             if !has_more {
-                if *app.show_finished_screen.read() {
-                    app.screen.set(Screen::QuizFinished);
-                } else {
-                    app.quiz.set(None);
-                    app.screen.set(Screen::Upload);
-                }
+                app.screen.set(Screen::QuizFinished);
                 return;
             }
             if auto_ms < 0 { return; }
@@ -1313,16 +1308,7 @@ fn QuizScreen() -> Element {
                     }
                     Key::ArrowRight | Key::Enter if answered => {
                         qs.next();
-                        let finished = !qs.has_more();
-                        if finished {
-                            if *app.show_finished_screen.read() {
-                                app.screen.set(Screen::QuizFinished);
-                            } else {
-                                drop(guard);
-                                app.quiz.set(None);
-                                app.screen.set(Screen::Upload);
-                            }
-                        }
+                        if !qs.has_more() { app.screen.set(Screen::QuizFinished); }
                     }
                     Key::ArrowLeft if qs.current > 0 => { qs.prev(); }
                     _ => {}
@@ -1539,14 +1525,7 @@ fn ControlButtons() -> Element {
                         qs.next();
                         !qs.has_more()
                     };
-                    if done {
-                        if *app.show_finished_screen.read() {
-                            app.screen.set(Screen::QuizFinished);
-                        } else {
-                            app.quiz.set(None);
-                            app.screen.set(Screen::Upload);
-                        }
-                    }
+                    if done { app.screen.set(Screen::QuizFinished); }
                 },
                 span { class: "material-symbols-outlined", "navigate_next" } " 下一題"
             }
@@ -1764,7 +1743,7 @@ fn FsrsRatingBar() -> Element {
 fn QuizFinished() -> Element {
     let mut app = use_context::<AppSignals>();
 
-    let (correct, wrong) = {
+    let (correct, wrong, show_score) = {
         let qs = app.quiz.read();
         let qs = match qs.as_ref() {
             Some(qs) => qs,
@@ -1772,18 +1751,57 @@ fn QuizFinished() -> Element {
         };
         let ok = qs.history.iter().filter(|h| h.answered && !h.skipped && h.selected_idx == Some(h.correct_opt)).count();
         let ko = qs.history.iter().filter(|h| h.answered && !h.skipped && h.selected_idx != Some(h.correct_opt)).count();
-        (ok, ko)
+        let show = *app.show_finished_screen.read();
+        (ok, ko, show)
     };
+    let total = correct + wrong;
+    let pct = if total > 0 { (correct as f64 / total as f64 * 100.0).round() as u32 } else { 0 };
+    let score_color = if pct >= 85 { "#43a047" } else if pct >= 61 { "#FFB300" } else { "#e53935" };
+    let r = 80.0;
+    let circ = 2.0 * std::f64::consts::PI * r;
+    let mut cur_off = use_signal(|| circ);
+    use_effect(move || {
+        let off = circ * (1.0 - pct as f64 / 100.0);
+        spawn(async move { sleep_ms(80).await; cur_off.set(off); });
+    });
 
     rsx! {
         div { class: "finish-screen",
-            div { class: "finish-icon",
-                span { class: "material-symbols-outlined", "check_circle" }
+            if show_score {
+                svg {
+                    width: "200", height: "200", view_box: "0 0 200 200",
+                    circle {
+                        cx: "100", cy: "100", r: "{r}",
+                        fill: "none", stroke: "#e0e0e0", stroke_width: "10",
+                    }
+                    circle {
+                        cx: "100", cy: "100", r: "{r}",
+                        fill: "none", stroke: "{score_color}",
+                        stroke_width: "10", stroke_linecap: "round",
+                        stroke_dasharray: "{circ}",
+                        stroke_dashoffset: "{cur_off}",
+                        transform: "rotate(-90, 100, 100)",
+                        style: "transition: stroke-dashoffset 1s cubic-bezier(0.4, 0, 0.2, 1);",
+                    }
+                    text {
+                        x: "100", y: "100",
+                        text_anchor: "middle", dominant_baseline: "central",
+                        font_size: "32", font_weight: "700",
+                        fill: "{score_color}",
+                        "{pct}"
+                    }
+                }
+            } else {
+                div { class: "finish-icon",
+                    span { class: "material-symbols-outlined", "check_circle" }
+                }
             }
             div { class: "finish-title", "測驗完成" }
-            div { class: "finish-score",
-                span { class: "correct", "{correct}" } " 題正確　"
-                span { class: "wrong", "{wrong}" } " 題錯誤"
+            if show_score {
+                div { class: "finish-score",
+                    span { class: "correct", "{correct}" } " 題正確　"
+                    span { class: "wrong", "{wrong}" } " 題錯誤"
+                }
             }
             button {
                 class: "finish-btn filled",
