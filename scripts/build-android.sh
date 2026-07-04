@@ -13,10 +13,24 @@ if [ "${INSIDE_VOC_BUILDER:-}" != "1" ]; then
 
     source "$SCRIPT_DIR/lib/common.sh"
     : "${container_name:=voc-builder-daemon}"
+    : "${keystore_file:=${HOME}/.android/debug.keystore}"
+    : "${keystore_pass:=android}"
+    : "${app_package_name:=com.scallion.vocab}"
+
+    # Split path for bind mount (dirname) and container path (basename)
+    keystore_dir="$(dirname "$keystore_file")"
+    keystore_basename="$(basename "$keystore_file")"
+
+    # Auto-detect key alias from keystore (fallback to debug defaults)
+    if [ -f "$keystore_file" ]; then
+        key_alias=$(keytool -list -v -keystore "$keystore_file" -storepass "$keystore_pass" 2>/dev/null \
+            | grep -oP '(?<=^(Alias name|別名名稱): ).*')
+    fi
+    : "${key_alias:=androiddebugkey}"
 
     # Ensure host cache directories exist (bind mount source must exist)
     mkdir -p "${HOME}/.gradle" "${HOME}/.cache/sccache" \
-        "${HOME}/.cargo/registry" "${HOME}/.cargo/git"
+        "${HOME}/.cargo/registry" "${HOME}/.cargo/git" "$keystore_dir"
 
     if [ "${VOC_BUILDER_DAEMON:-}" = "1" ]; then
         if "${RUNNER[@]}" container exists "$container_name"; then
@@ -29,7 +43,12 @@ if [ "${INSIDE_VOC_BUILDER:-}" != "1" ]; then
                 -v "${HOME}/.cargo/git:/root/.cargo/git:rslave" \
                 -v "${HOME}/.gradle:/root/.gradle:rslave" \
                 -v "${HOME}/.cache/sccache:/root/.cache/sccache:rslave" \
+                -v "${keystore_dir}:/root/.android:rslave" \
                 -e INSIDE_VOC_BUILDER=1 \
+                -e KEYSTORE_FILE="${keystore_basename}" \
+                -e KEYSTORE_PASS="${keystore_pass}" \
+                -e KEY_ALIAS="${key_alias}" \
+                -e APP_PACKAGE_NAME="${app_package_name}" \
                 -w /workspace \
                 "$container_location" \
                 bash -c "while true; do sleep infinity; done"
@@ -45,7 +64,12 @@ if [ "${INSIDE_VOC_BUILDER:-}" != "1" ]; then
         -v "${HOME}/.cargo/git:/root/.cargo/git:rslave" \
         -v "${HOME}/.gradle:/root/.gradle:rslave" \
         -v "${HOME}/.cache/sccache:/root/.cache/sccache:rslave" \
+        -v "${keystore_dir}:/root/.android:rslave" \
         -e INSIDE_VOC_BUILDER=1 \
+        -e KEYSTORE_FILE="${keystore_basename}" \
+        -e KEYSTORE_PASS="${keystore_pass}" \
+        -e KEY_ALIAS="${key_alias}" \
+        -e APP_PACKAGE_NAME="${app_package_name}" \
         -w /workspace \
         "$container_location" \
         bash /workspace/scripts/build-android.sh "$@"
@@ -59,9 +83,10 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ANDROID_HOME="${ANDROID_HOME:-/opt/android-sdk}"
 ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$(ls -d /opt/android-sdk/ndk/* 2>/dev/null | head -1)}"
 export ANDROID_HOME ANDROID_NDK_HOME
-KEYSTORE="$HOME/.android/debug.keystore"
-KEYSTORE_PASS="android"
-KEY_ALIAS="androiddebugkey"
+: "${KEYSTORE_FILE:=debug.keystore}"
+: "${KEYSTORE_PASS:=android}"
+: "${KEY_ALIAS:=androiddebugkey}"
+KEYSTORE="$HOME/.android/${KEYSTORE_FILE}"
 BUILD_TOOLS_DIR="${ANDROID_HOME}/build-tools"
 PROFILE="release"
 GRADLE_DIR="$PROJECT_ROOT/gui/target/dx/scallion-vocab/${PROFILE}/android/app"
@@ -76,7 +101,7 @@ APKSIGNER="${BUILD_TOOLS_DIR}/${BT_VERSION}/apksigner"
 ZIPALIGN="${BUILD_TOOLS_DIR}/${BT_VERSION}/zipalign"
 echo "  build-tools:     ${BT_VERSION}"
 echo "  apksigner:       ${APKSIGNER}"
-echo "  keystore:        ${KEYSTORE}"
+echo "  keystore:        ${KEYSTORE} (alias: ${KEY_ALIAS})"
 
 if [ ! -f "$APKSIGNER" ]; then
     echo "ERROR: apksigner not found at $APKSIGNER"
@@ -127,6 +152,17 @@ sed -i '/kotlinOptions {/,/}/d' "$APP_BUILD_GRADLE"
 sed -i '/compileOptions {/i\    kotlin {\n        compilerOptions.jvmTarget.set(JvmTarget.JVM_17)\n    }\n' "$APP_BUILD_GRADLE"
 
 echo "  → Warning fixes complete"
+echo ""
+
+echo "=== Step 2c: Applying package name ==="
+APP_PACKAGE_NAME="${APP_PACKAGE_NAME:-com.scallion.vocab}"
+echo "  app_package_name: ${APP_PACKAGE_NAME}"
+sed -i "s/namespace=\"[^\"]*\"/namespace=\"${APP_PACKAGE_NAME}\"/" "$APP_BUILD_GRADLE"
+sed -i "s/applicationId = \"[^\"]*\"/applicationId = \"${APP_PACKAGE_NAME}\"/" "$APP_BUILD_GRADLE"
+# Update BuildConfig typealias in Kotlin source
+find "$GRADLE_DIR/app/src/main/kotlin" -name "*.kt" -exec \
+    sed -i "s/typealias BuildConfig = [a-zA-Z0-9._]*\.BuildConfig/typealias BuildConfig = ${APP_PACKAGE_NAME}.BuildConfig/" {} +
+echo "  → Package name applied to build.gradle.kts and Kotlin sources"
 echo ""
 
 echo "=== Step 3: Rebuilding APK ==="
