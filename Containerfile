@@ -22,6 +22,9 @@ RUN rustup target add aarch64-linux-android
 # Dioxus CLI
 RUN cargo install dioxus-cli --version ">=0.7" --locked
 
+# sccache — Rust compilation cache wrapper
+RUN cargo install sccache --locked
+
 ENV ANDROID_SDK_ROOT=/opt/android-sdk
 ENV ANDROID_HOME=/opt/android-sdk
 ENV PATH="${ANDROID_HOME}/cmdline-tools/latest/bin:${PATH}"
@@ -83,3 +86,6 @@ RUN mkdir -p /root/.android && keytool -genkey -v \
     -keypass android -keyalg RSA -keysize 2048 \
     -validity 10000 \
     -dname "CN=Android Debug,O=Android,C=US"
+
+# Enable sccache for all cargo/rustc invocations
+ENV RUSTC_WRAPPER=sccache

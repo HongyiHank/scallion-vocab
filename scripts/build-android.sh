@@ -14,12 +14,21 @@ if [ "${INSIDE_VOC_BUILDER:-}" != "1" ]; then
     source "$SCRIPT_DIR/lib/common.sh"
     : "${container_name:=voc-builder-daemon}"
 
+    # Ensure host cache directories exist (bind mount source must exist)
+    mkdir -p "${HOME}/.gradle" "${HOME}/.cache/sccache" \
+        "${HOME}/.cargo/registry" "${HOME}/.cargo/git"
+
     if [ "${VOC_BUILDER_DAEMON:-}" = "1" ]; then
         if "${RUNNER[@]}" container exists "$container_name"; then
             "${RUNNER[@]}" start "$container_name" >/dev/null 2>&1 || true
         else
             "${RUNNER[@]}" run -d --name "$container_name" \
                 -v "${PROJECT_ROOT}:/workspace:rslave" \
+                -v "${PROJECT_ROOT}/gui/target:/workspace/gui/target:rslave" \
+                -v "${HOME}/.cargo/registry:/root/.cargo/registry:rslave" \
+                -v "${HOME}/.cargo/git:/root/.cargo/git:rslave" \
+                -v "${HOME}/.gradle:/root/.gradle:rslave" \
+                -v "${HOME}/.cache/sccache:/root/.cache/sccache:rslave" \
                 -e INSIDE_VOC_BUILDER=1 \
                 -w /workspace \
                 "$container_location" \
@@ -31,6 +40,11 @@ if [ "${INSIDE_VOC_BUILDER:-}" != "1" ]; then
 
     exec "${RUNNER[@]}" run --rm \
         -v "${PROJECT_ROOT}:/workspace:rslave" \
+        -v "${PROJECT_ROOT}/gui/target:/workspace/gui/target:rslave" \
+        -v "${HOME}/.cargo/registry:/root/.cargo/registry:rslave" \
+        -v "${HOME}/.cargo/git:/root/.cargo/git:rslave" \
+        -v "${HOME}/.gradle:/root/.gradle:rslave" \
+        -v "${HOME}/.cache/sccache:/root/.cache/sccache:rslave" \
         -e INSIDE_VOC_BUILDER=1 \
         -w /workspace \
         "$container_location" \
