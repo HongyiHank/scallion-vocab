@@ -103,6 +103,45 @@ fn App() -> Element {
         });
     });
 
+    // Register global JS handler for Android hardware back button.
+    // Called from MainActivity.onKeyDown before any default WebView/Activity back behaviour.
+    use_effect(move || {
+        spawn(async move {
+            let js = r#"
+            window.__handleAndroidBack = function() {
+                var el;
+                // License detail overlay → back to list
+                el = document.querySelector('.license-detail-close');
+                if (el) { el.click(); return; }
+                // License list → close
+                el = document.querySelector('.license-dialog-close');
+                if (el) { el.click(); return; }
+                // Settings overlay → close
+                el = document.querySelector('.settings-close');
+                if (el) { el.click(); return; }
+                // HTML fallback → cancel (text-btn inside fallback-actions)
+                el = document.querySelector('.html-fallback');
+                if (el) { var c = el.querySelector('.fallback-actions .text-btn'); if (c) { c.click(); return; } }
+                // Pause overlay → resume (second pause-icon-box = "繼續")
+                el = document.querySelector('.pause-overlay');
+                if (el) { var b = el.querySelectorAll('.pause-icon-box'); if (b.length >= 2) { b[1].click(); return; } }
+                // Quiz screen → show pause overlay (top-right icon button)
+                el = document.querySelector('.quiz-screen');
+                if (el) { var b = el.querySelector('.top-icon-btn'); if (b) { b.click(); return; } }
+                // Upload / QuizFinished → double-tap to exit
+                if (!window.__backExitFlag) {
+                    window.__backExitFlag = true;
+                    try { AndroidBackHandler.showToast('再按一次以退出'); } catch(e) {}
+                    setTimeout(function() { window.__backExitFlag = false; }, 3000);
+                } else {
+                    try { AndroidBackHandler.finishActivity(); } catch(e) {}
+                }
+            };
+            "#;
+            let _ = document::eval(js).await;
+        });
+    });
+
     let screen = app.screen.read().clone();
     let toast = app.toast.read().clone();
 

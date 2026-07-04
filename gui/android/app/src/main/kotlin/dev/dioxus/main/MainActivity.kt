@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
@@ -32,9 +33,38 @@ class MainActivity : WryActivity() {
         }
     }
 
+    // Intercept Android back button → delegate to JS handler for app-level navigation.
+    // Without this, WryActivity.onKeyDown either navigates WebView back or exits the app.
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            mainWebView.evaluateJavascript(
+                "window.__handleAndroidBack && window.__handleAndroidBack()",
+                null
+            )
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     private fun registerExternalUrlBridge(webView: WebView) {
         webView.addJavascriptInterface(ExternalOpener(this), "AndroidExternal")
         webView.addJavascriptInterface(QuizletFetcher(this), "AndroidQuizletFetcher")
+        webView.addJavascriptInterface(BackHandler(this), "AndroidBackHandler")
+    }
+
+    /** JS-accessible back-button helper: finish activity or show toast. */
+    class BackHandler(private val activity: MainActivity) {
+        @JavascriptInterface
+        fun finishActivity() {
+            activity.runOnUiThread { activity.finish() }
+        }
+
+        @JavascriptInterface
+        fun showToast(msg: String) {
+            activity.runOnUiThread {
+                Toast.makeText(activity, msg, Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     class ExternalOpener(private val activity: Activity) {
