@@ -32,6 +32,7 @@ struct AppSignals {
     toast_seq: Signal<u64>,
     is_dark: Signal<bool>,
     infinite_mode: Signal<bool>,
+    show_finished_screen: Signal<bool>,
     auto_advance_ms: Signal<i64>,
     fsrs_config: Signal<FsrsConfig>,
     prefs_loaded: Signal<bool>,
@@ -56,6 +57,7 @@ fn App() -> Element {
         toast_seq: Signal::new(0),
         is_dark: Signal::new(false),
         infinite_mode: Signal::new(true),
+        show_finished_screen: Signal::new(true),
         auto_advance_ms: Signal::new(DEFAULT_AUTO_ADVANCE_MS),
         fsrs_config: Signal::new(FsrsConfig::default()),
         prefs_loaded: Signal::new(false),
@@ -78,12 +80,14 @@ fn App() -> Element {
 
         let is_dark = *app.is_dark.read();
         let infinite = *app.infinite_mode.read();
+        let show_finished = *app.show_finished_screen.read();
         let cfg = app.fsrs_config.cloned();
         let ms = *app.auto_advance_ms.read();
 
         spawn(async move {
             persist_theme(is_dark).await;
             persist_infinite_mode(infinite).await;
+            persist_show_finished_screen(show_finished).await;
             persist_fsrs_config(cfg).await;
             persist_auto_advance_ms(ms).await;
         });
@@ -179,6 +183,7 @@ struct StoredPrefs {
     theme: String,
     urls: Vec<String>,
     infinite_mode: Option<bool>,
+    show_finished_screen: Option<bool>,
     auto_advance_ms: Option<i64>,
     fsrs_config: Option<String>,
 }
@@ -205,6 +210,7 @@ async fn load_prefs(mut app: AppSignals) {
         if let Ok(prefs) = serde_json::from_str::<StoredPrefs>(&payload) {
             app.is_dark.set(prefs.theme == "dark");
             app.infinite_mode.set(prefs.infinite_mode.unwrap_or(true));
+            app.show_finished_screen.set(prefs.show_finished_screen.unwrap_or(true));
             if let Some(v) = prefs.auto_advance_ms {
                 app.auto_advance_ms.set(v);
             }
@@ -266,6 +272,16 @@ async fn persist_infinite_mode(infinite: bool) {
     );
     if let Err(e) = document::eval(&script).await {
         log!("[Prefs::InfiniteMode] save failed: {e}");
+    }
+}
+
+async fn persist_show_finished_screen(enabled: bool) {
+    let val = serde_json::to_string(&enabled).unwrap_or_else(|_| "true".to_string());
+    let script = format!(
+        r#"try {{ localStorage.setItem('show_finished_screen', {val}); }} catch (_) {{}}"#
+    );
+    if let Err(e) = document::eval(&script).await {
+        log!("[Prefs::ShowFinished] save failed: {e}");
     }
 }
 
@@ -925,6 +941,23 @@ fn UploadScreen() -> Element {
                         }
                         div {
                             class: "settings-item",
+                            onclick: move |_| {
+                                let new_val = !*app.show_finished_screen.read();
+                                app.show_finished_screen.set(new_val);
+                            },
+                            div { class: "settings-item-icon",
+                                span { class: "material-symbols-outlined", "celebration" }
+                            }
+                            div { class: "settings-item-label",
+                                div { "是否啟用結算分數" }
+                                div { class: "settings-item-sub", "此設定僅在關閉無限考試時生效" }
+                            }
+                            div {
+                                class: if *app.show_finished_screen.read() { "settings-switch on" } else { "settings-switch" },
+                            }
+                        }
+                        div {
+                            class: "settings-item",
                             style: "cursor: default;",
                             div { class: "settings-item-icon",
                                 span { class: "material-symbols-outlined", "timer" }
@@ -1202,7 +1235,12 @@ fn QuizScreen() -> Element {
         if is_answered && is_last {
             let has_more = app.quiz.read().as_ref().is_some_and(|qs| qs.has_more());
             if !has_more {
-                app.screen.set(Screen::QuizFinished);
+                if *app.show_finished_screen.read() {
+                    app.screen.set(Screen::QuizFinished);
+                } else {
+                    app.quiz.set(None);
+                    app.screen.set(Screen::Upload);
+                }
                 return;
             }
             if auto_ms < 0 { return; }
@@ -1275,7 +1313,16 @@ fn QuizScreen() -> Element {
                     }
                     Key::ArrowRight | Key::Enter if answered => {
                         qs.next();
-                        if !qs.has_more() { app.screen.set(Screen::QuizFinished); }
+                        let finished = !qs.has_more();
+                        if finished {
+                            if *app.show_finished_screen.read() {
+                                app.screen.set(Screen::QuizFinished);
+                            } else {
+                                drop(guard);
+                                app.quiz.set(None);
+                                app.screen.set(Screen::Upload);
+                            }
+                        }
                     }
                     Key::ArrowLeft if qs.current > 0 => { qs.prev(); }
                     _ => {}
@@ -1492,7 +1539,14 @@ fn ControlButtons() -> Element {
                         qs.next();
                         !qs.has_more()
                     };
-                    if done { app.screen.set(Screen::QuizFinished); }
+                    if done {
+                        if *app.show_finished_screen.read() {
+                            app.screen.set(Screen::QuizFinished);
+                        } else {
+                            app.quiz.set(None);
+                            app.screen.set(Screen::Upload);
+                        }
+                    }
                 },
                 span { class: "material-symbols-outlined", "navigate_next" } " 下一題"
             }
