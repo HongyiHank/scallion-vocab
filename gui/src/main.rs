@@ -12,11 +12,14 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum ThemeMode { System, Light, Dark }
+
 const MAX_RECENT_URLS: usize = 5;
 const TOAST_DURATION_MS: u64 = 2_800;
 const DEFAULT_AUTO_ADVANCE_MS: i64 = 1_000;
 const FILE_DIALOG_TIMEOUT_MS: u64 = 60_000;
-const ANTI_FOUC_SCRIPT: &str = "try{document.documentElement.setAttribute('data-theme',localStorage.getItem('theme')||'light')}catch(_){}";
+const ANTI_FOUC_SCRIPT: &str = "try{var t=localStorage.getItem('theme')||'system';if(t==='system'){try{t=AndroidSystemTheme.isSystemDark()?'dark':'light'}catch(e){t='light'}}document.documentElement.setAttribute('data-theme',t)}catch(_){}";
 
 #[derive(Clone, Debug, PartialEq)]
 struct ToastState {
@@ -30,7 +33,8 @@ struct AppSignals {
     quiz: Signal<Option<QuizState>>,
     toast: Signal<Option<ToastState>>,
     toast_seq: Signal<u64>,
-    is_dark: Signal<bool>,
+    theme_mode: Signal<ThemeMode>,
+    is_dark: Signal<bool>,  // resolved dark mode (derived from theme_mode + system detection)
     infinite_mode: Signal<bool>,
     show_finished_screen: Signal<bool>,
     auto_advance_ms: Signal<i64>,
@@ -55,6 +59,7 @@ fn App() -> Element {
         quiz: Signal::new(None),
         toast: Signal::new(None),
         toast_seq: Signal::new(0),
+        theme_mode: Signal::new(ThemeMode::System),
         is_dark: Signal::new(false),
         infinite_mode: Signal::new(true),
         show_finished_screen: Signal::new(true),
@@ -72,20 +77,43 @@ fn App() -> Element {
         });
     });
 
-    // 單一 effect 訂閱所有持久化信號，減少重複 prefs_loaded guard
+    // 主題模式 → 解析 is_dark + 持久化
     use_effect(move || {
         if !*app.prefs_loaded.read() {
             return;
         }
 
-        let is_dark = *app.is_dark.read();
+        let mode = *app.theme_mode.read();
+
+        spawn(async move {
+            let is_dark = match mode {
+                ThemeMode::Light => false,
+                ThemeMode::Dark => true,
+                ThemeMode::System => {
+                    let mut eval = document::eval(
+                        r#"try { dioxus.send(AndroidSystemTheme.isSystemDark() ? 'true' : 'false'); } catch(_) { dioxus.send('false'); }"#,
+                    );
+                    eval.recv::<String>().await.map(|s| s == "true").unwrap_or(false)
+                }
+            };
+            app.is_dark.set(is_dark);
+            persist_theme(mode, is_dark).await;
+        });
+    });
+
+    // 其他信號持久化（非主題）
+    use_effect(move || {
+        if !*app.prefs_loaded.read() {
+            return;
+        }
+
+        let _ = *app.is_dark.read();  // 追蹤以重跑
         let infinite = *app.infinite_mode.read();
         let show_finished = *app.show_finished_screen.read();
         let cfg = app.fsrs_config.cloned();
         let ms = *app.auto_advance_ms.read();
 
         spawn(async move {
-            persist_theme(is_dark).await;
             persist_infinite_mode(infinite).await;
             persist_show_finished_screen(show_finished).await;
             persist_fsrs_config(cfg).await;
@@ -181,6 +209,7 @@ fn App() -> Element {
 #[derive(Debug, Deserialize)]
 struct StoredPrefs {
     theme: String,
+    resolved_dark: bool,
     urls: Vec<String>,
     infinite_mode: Option<bool>,
     show_finished_screen: Option<bool>,
@@ -192,23 +221,33 @@ async fn load_prefs(mut app: AppSignals) {
     let mut eval = document::eval(
         r#"
         try {
-            const theme = localStorage.getItem('theme') || 'light';
-            document.documentElement.setAttribute('data-theme', theme);
+            let theme = localStorage.getItem('theme') || '';
+            if (!theme) theme = 'system';
+            let resolved = theme;
+            if (theme === 'system') {
+                resolved = (window.AndroidSystemTheme && AndroidSystemTheme.isSystemDark()) ? 'dark' : 'light';
+            }
+            document.documentElement.setAttribute('data-theme', resolved);
             const urls = JSON.parse(localStorage.getItem('recent_urls') || '[]');
             const infinite_mode = localStorage.getItem('infinite_mode') !== 'false';
             const auto_advance_ms = parseInt(localStorage.getItem('auto_advance_ms'), 10) || null;
             const fsrs_config = localStorage.getItem('fsrs_config') || '';
-            dioxus.send(JSON.stringify({ theme, urls: Array.isArray(urls) ? urls : [], infinite_mode, auto_advance_ms, fsrs_config }));
+            dioxus.send(JSON.stringify({ theme, resolved_dark: resolved === 'dark', urls: Array.isArray(urls) ? urls : [], infinite_mode, auto_advance_ms, fsrs_config }));
         } catch (_) {
             document.documentElement.setAttribute('data-theme', 'light');
-            dioxus.send(JSON.stringify({ theme: 'light', urls: [], infinite_mode: true, auto_advance_ms: null, fsrs_config: '' }));
+            dioxus.send(JSON.stringify({ theme: 'system', resolved_dark: false, urls: [], infinite_mode: true, auto_advance_ms: null, fsrs_config: '' }));
         }
         "#,
     );
 
     if let Ok(payload) = eval.recv::<String>().await {
         if let Ok(prefs) = serde_json::from_str::<StoredPrefs>(&payload) {
-            app.is_dark.set(prefs.theme == "dark");
+            app.theme_mode.set(match prefs.theme.as_str() {
+                "dark" => ThemeMode::Dark,
+                "light" => ThemeMode::Light,
+                _ => ThemeMode::System,
+            });
+            app.is_dark.set(prefs.resolved_dark);
             app.infinite_mode.set(prefs.infinite_mode.unwrap_or(true));
             app.show_finished_screen.set(prefs.show_finished_screen.unwrap_or(true));
             if let Some(v) = prefs.auto_advance_ms {
@@ -231,17 +270,23 @@ async fn load_prefs(mut app: AppSignals) {
     app.prefs_loaded.set(true);
 }
 
-async fn persist_theme(is_dark: bool) {
-    let theme = if is_dark { "dark" } else { "light" };
-    let theme_js = serde_json::to_string(theme).unwrap_or_else(|_| "\"light\"".to_string());
+async fn persist_theme(mode: ThemeMode, is_dark: bool) {
+    let data_theme = if is_dark { "dark" } else { "light" };
+    let mode_str = match mode {
+        ThemeMode::System => "system",
+        ThemeMode::Light => "light",
+        ThemeMode::Dark => "dark",
+    };
+    let mode_js = serde_json::to_string(mode_str).unwrap_or_else(|_| "\"system\"".to_string());
 
+    let data_js = serde_json::to_string(data_theme).unwrap_or_else(|_| "\"light\"".to_string());
     let script = format!(
         r#"
         try {{
-            document.documentElement.setAttribute('data-theme', {theme_js});
-            localStorage.setItem('theme', {theme_js});
+            document.documentElement.setAttribute('data-theme', {data_js});
+            localStorage.setItem('theme', {mode_js});
         }} catch (_) {{
-            document.documentElement.setAttribute('data-theme', {theme_js});
+            document.documentElement.setAttribute('data-theme', {data_js});
         }}
         "#
     );
@@ -855,7 +900,7 @@ fn UploadScreen() -> Element {
                         title: "還原預設值",
                         onclick: move |_| {
                             app.fsrs_config.set(FsrsConfig::default());
-                            app.is_dark.set(false);
+                            app.theme_mode.set(ThemeMode::System);
                             app.infinite_mode.set(true);
                             app.auto_advance_ms.set(DEFAULT_AUTO_ADVANCE_MS);
                             push_toast(app, "已還原預設值");
@@ -888,20 +933,25 @@ fn UploadScreen() -> Element {
                 }
                 if *settings_tab.read() == 0 {
                     div { class: "settings-body",
-                        div {
-                            class: "settings-item",
-                            onclick: move |_| {
-                                let new_val = !*app.is_dark.read();
-                                app.is_dark.set(new_val);
-                            },
-                            div { class: "settings-item-icon",
-                                span { class: "material-symbols-outlined",
-                                    if *app.is_dark.read() { "dark_mode" } else { "light_mode" }
-                                }
+                        div { class: "settings-section-label", "主題" }
+                        div { class: "theme-segmented",
+                            button {
+                                class: if *app.theme_mode.read() == ThemeMode::Light { "theme-btn active" } else { "theme-btn" },
+                                onclick: move |_| app.theme_mode.set(ThemeMode::Light),
+                                span { class: "material-symbols-outlined", "light_mode" }
+                                span { "淺色" }
                             }
-                            div { class: "settings-item-label", "深色主題" }
-                            div {
-                                class: if *app.is_dark.read() { "settings-switch on" } else { "settings-switch" },
+                            button {
+                                class: if *app.theme_mode.read() == ThemeMode::System { "theme-btn active" } else { "theme-btn" },
+                                onclick: move |_| app.theme_mode.set(ThemeMode::System),
+                                span { class: "material-symbols-outlined", "settings_brightness" }
+                                span { "系統" }
+                            }
+                            button {
+                                class: if *app.theme_mode.read() == ThemeMode::Dark { "theme-btn active" } else { "theme-btn" },
+                                onclick: move |_| app.theme_mode.set(ThemeMode::Dark),
+                                span { class: "material-symbols-outlined", "dark_mode" }
+                                span { "深色" }
                             }
                         }
                     }

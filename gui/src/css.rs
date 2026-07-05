@@ -717,6 +717,41 @@ button.history-item:active { transform: scale(0.98); }
     background: var(--md-sys-color-on-primary);
 }
 
+/* MD3 segmented button for theme mode selector */
+.settings-section-label {
+    font-size: .75em; font-weight: 500; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--md-sys-color-on-surface-variant);
+    padding: 4px 8px; margin-bottom: 8px;
+}
+.theme-segmented {
+    display: flex; border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--shape-full); overflow: hidden;
+    margin-bottom: 8px;
+}
+.theme-btn {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 10px 8px; border: none; cursor: pointer;
+    font-size: .85em; font-weight: 500; font-family: inherit;
+    background: transparent; color: var(--md-sys-color-on-surface-variant);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.theme-btn:not(:last-child) {
+    border-right: 1px solid var(--md-sys-color-outline);
+}
+.theme-btn.active {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+}
+.theme-btn .material-symbols-outlined {
+    font-size: 1.2em; font-variation-settings: 'FILL' 1;
+}
+@media (hover: hover) {
+    .theme-btn:not(.active):hover {
+        background: color-mix(in srgb, var(--md-sys-color-on-surface) 6%, transparent);
+    }
+}
+
 /* ── Settings bottom (GitHub icon + version) ── */
 .settings-bottom {
     display: flex; flex-direction: column; align-items: center; gap: 4px;

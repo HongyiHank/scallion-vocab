@@ -50,6 +50,7 @@ class MainActivity : WryActivity() {
         webView.addJavascriptInterface(ExternalOpener(this), "AndroidExternal")
         webView.addJavascriptInterface(QuizletFetcher(this), "AndroidQuizletFetcher")
         webView.addJavascriptInterface(BackHandler(this), "AndroidBackHandler")
+        webView.addJavascriptInterface(SystemThemeDetector(this), "AndroidSystemTheme")
     }
 
     /** JS-accessible back-button helper: finish activity or show toast. */
@@ -64,6 +65,15 @@ class MainActivity : WryActivity() {
             activity.runOnUiThread {
                 Toast.makeText(activity, msg, Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    class SystemThemeDetector(private val activity: MainActivity) {
+        @JavascriptInterface
+        fun isSystemDark(): Boolean {
+            val nightModeFlags = activity.resources.configuration.uiMode and
+                android.content.res.Configuration.UI_MODE_NIGHT_MASK
+            return nightModeFlags == android.content.res.Configuration.UI_MODE_NIGHT_YES
         }
     }
 
