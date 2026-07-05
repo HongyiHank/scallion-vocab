@@ -16,7 +16,12 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 typealias BuildConfig = com.scallion.vocab.BuildConfig
 
@@ -51,6 +56,7 @@ class MainActivity : WryActivity() {
         webView.addJavascriptInterface(QuizletFetcher(this), "AndroidQuizletFetcher")
         webView.addJavascriptInterface(BackHandler(this), "AndroidBackHandler")
         webView.addJavascriptInterface(SystemThemeDetector(this), "AndroidSystemTheme")
+        webView.addJavascriptInterface(AppUpdater(this), "AndroidAppUpdater")
     }
 
     /** JS-accessible back-button helper: finish activity or show toast. */
@@ -96,6 +102,44 @@ class MainActivity : WryActivity() {
                 }
             }
         }
+    }
+
+    /** JS-accessible APK download + installer with progress reporting. */
+    class AppUpdater(private val activity: MainActivity) {
+        @Volatile private var p: Double = 0.0
+
+        @JavascriptInterface
+        fun downloadAndInstall(url: String, size: Long) {
+            p = 0.0
+            Thread {
+                try {
+                    val conn = URL(url).openConnection() as HttpURLConnection
+                    conn.connectTimeout = 10000
+                    conn.readTimeout = 60000
+                    conn.connect()
+                    val apk = File(activity.cacheDir, "updates").also { it.mkdirs() }.resolve("scallion-vocab-update.apk")
+                    val buf = ByteArray(8192)
+                    var total = 0L
+                    conn.inputStream.use { i ->
+                        FileOutputStream(apk).use { o ->
+                            while (true) { val n = i.read(buf); if (n < 0) break; o.write(buf, 0, n); total += n; if (size > 0) p = (total.toDouble() / size).coerceAtMost(1.0) }
+                        }
+                    }
+                    p = 1.0
+                    val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", apk)
+                    activity.startActivity(Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, "application/vnd.android.package-archive")
+                        flags = Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    })
+                } catch (e: Exception) {
+                    p = -1.0
+                    activity.runOnUiThread { Toast.makeText(activity, "更新失敗: ${e.message}", Toast.LENGTH_LONG).show() }
+                }
+            }.start()
+        }
+
+        @JavascriptInterface fun getProgress() = p
     }
 
     class QuizletFetcher(private val activity: MainActivity) {

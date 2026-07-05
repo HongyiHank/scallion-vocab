@@ -1051,4 +1051,77 @@ button.history-item:active { transform: scale(0.98); }
 .finish-btn.filled:hover { box-shadow: var(--elev-1); }
 .finish-btn.outlined { border: 1px solid var(--md-sys-color-outline); background: transparent; color: var(--md-sys-color-primary); }
 .finish-btn.outlined:hover { background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
+
+/* ── Update dialog ── */
+.update-overlay {
+    position: fixed; inset: 0; z-index: 2000;
+    background: rgba(0,0,0,0.45);
+    display: flex; align-items: center; justify-content: center;
+    animation: fadeUp var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-emphasized-decelerate);
+}
+.update-dialog {
+    background: var(--md-sys-color-surface-container);
+    border-radius: var(--shape-xxl);
+    padding: clamp(24px,5vw,36px);
+    text-align: center; max-width: 340px; width: 85%;
+    box-shadow: var(--elev-3);
+}
+.update-title {
+    font-size: 1.2em; font-weight: 600; margin-bottom: 12px;
+    color: var(--md-sys-color-on-surface);
+}
+.update-body {
+    font-size: .95em; margin-bottom: 24px; line-height: 1.5;
+    color: var(--md-sys-color-on-surface-variant);
+}
+.update-actions {
+    display: flex; gap: 12px; justify-content: center;
+}
+.update-btn {
+    flex: 1; padding: 12px 20px; min-height: 44px;
+    border-radius: var(--shape-full);
+    font-size: .95em; font-weight: 500; cursor: pointer; font-family: inherit;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                transform var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.update-btn:active { transform: scale(0.97); }
+.update-btn.primary {
+    border: none; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary);
+}
+.update-btn.primary:hover { box-shadow: var(--elev-1); }
+.update-btn.secondary {
+    border: 1px solid var(--md-sys-color-outline); background: transparent; color: var(--md-sys-color-primary);
+}
+.update-btn.secondary:hover { background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
+
+/* ── Download progress inside update dialog ── */
+.dl-progress-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 20px;
+    font-size: 1.1em;
+    font-weight: 500;
+    color: var(--md-sys-color-primary);
+}
+.update-dl-icon {
+    font-size: 28px;
+    color: var(--md-sys-color-primary);
+}
+.dl-track {
+    height: 6px;
+    background: var(--md-sys-color-surface-container-highest);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 4px;
+}
+.dl-fill {
+    height: 100%;
+    background: var(--md-sys-color-primary);
+    border-radius: 3px;
+    transition: width 250ms cubic-bezier(0.2,0,0,1);
+    transform-origin: left;
+}
 "#;

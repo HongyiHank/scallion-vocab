@@ -15,11 +15,30 @@ use std::time::{Duration, Instant};
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum ThemeMode { System, Light, Dark }
 
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const GH_REPO: &str = "HongyiHank/scallion-vocab";
 const MAX_RECENT_URLS: usize = 5;
 const TOAST_DURATION_MS: u64 = 2_800;
 const DEFAULT_AUTO_ADVANCE_MS: i64 = 1_000;
 const FILE_DIALOG_TIMEOUT_MS: u64 = 60_000;
 const ANTI_FOUC_SCRIPT: &str = "try{var t=localStorage.getItem('theme')||'system';if(t==='system'){try{t=AndroidSystemTheme.isSystemDark()?'dark':'light'}catch(e){t='light'}}document.documentElement.setAttribute('data-theme',t)}catch(_){}";
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+struct UpdateInfo {
+    tag: String,
+    url: String,
+    size: u64,
+}
+
+fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
+    let v = v.strip_prefix('v').unwrap_or(v);
+    let parts: Vec<&str> = v.split('.').collect();
+    Some((
+        parts.first()?.parse().ok()?,
+        parts.get(1)?.parse().ok()?,
+        parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0),
+    ))
+}
 
 #[derive(Clone, Debug, PartialEq)]
 struct ToastState {
@@ -41,6 +60,8 @@ struct AppSignals {
     fsrs_config: Signal<FsrsConfig>,
     prefs_loaded: Signal<bool>,
     recent_urls: Signal<Vec<String>>,
+    update_info: Signal<Option<UpdateInfo>>,
+    download_progress: Signal<Option<f64>>,
 }
 
 fn push_toast(mut app: AppSignals, msg: impl Into<String>) {
@@ -67,6 +88,8 @@ fn App() -> Element {
         fsrs_config: Signal::new(FsrsConfig::default()),
         prefs_loaded: Signal::new(false),
         recent_urls: Signal::new(Vec::new()),
+        update_info: Signal::new(None),
+        download_progress: Signal::new(None),
     });
 
     let mut app = use_context::<AppSignals>();
@@ -135,6 +158,36 @@ fn App() -> Element {
         });
     });
 
+    // Check for updates on launch (after prefs loaded).
+    use_effect(move || {
+        if !*app.prefs_loaded.read() {
+            return;
+        }
+        let mut app_clone = app;
+        spawn(async move {
+            let js = format!(
+                    r#"fetch('https://api.github.com/repos/{repo}/releases/latest',{{headers:{{'Accept':'application/json','User-Agent':'scallion-vocab'}}}}).then(r=>r.json()).then(d=>{{var info=JSON.stringify({{tag:d.tag_name||'',url:(d.assets&&d.assets[0])?d.assets[0].browser_download_url:'',size:(d.assets&&d.assets[0])?d.assets[0].size:0}});dioxus.send(info)}}).catch(function(){{dioxus.send('')}});"#,
+                repo = GH_REPO
+            );
+            let mut eval = document::eval(&js);
+            match eval.recv::<String>().await {
+                Ok(json) if !json.is_empty() => {
+                    if let Ok(info) = serde_json::from_str::<UpdateInfo>(&json) {
+                        if !info.tag.is_empty()
+                            && !info.url.is_empty()
+                            && parse_version(&info.tag).map_or(false, |v| {
+                                parse_version(APP_VERSION).map_or(true, |cur| v > cur)
+                            })
+                        {
+                            app_clone.update_info.set(Some(info));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        });
+    });
+
     // Register global JS handler for Android hardware back button.
     // Called from MainActivity.onKeyDown before any default WebView/Activity back behaviour.
     use_effect(move || {
@@ -176,6 +229,8 @@ fn App() -> Element {
 
     let screen = app.screen.read().clone();
     let toast = app.toast.read().clone();
+    let update_info = app.update_info.read().clone();
+    let download_progress = app.download_progress.read().clone();
 
     rsx! {
         style { "{css::STYLES}" }
@@ -203,6 +258,78 @@ fn App() -> Element {
             aria_live: "assertive",
             "{toast.as_ref().map(|t| t.text.as_str()).unwrap_or_default()}"
         }
+
+        // update prompt dialog
+        {update_info.as_ref().map(|info| {
+            let tag = info.tag.strip_prefix('v').unwrap_or(&info.tag).to_string();
+            let url = info.url.clone();
+            let size = info.size;
+            let onclick_update = move |_| {
+                app.update_info.set(None);
+                app.download_progress.set(Some(0.0));
+
+                let js = format!(
+                    "AndroidAppUpdater.downloadAndInstall('{}', {})",
+                    url.replace('\'', "\\'"),
+                    size,
+                );
+                spawn(async move { let _ = document::eval(&js).await; });
+
+                let mut app_poll = app;
+                spawn(async move {
+                    loop {
+                        sleep_ms(300).await;
+                        let mut eval = document::eval(
+                            "dioxus.send(String(AndroidAppUpdater.getProgress()))",
+                        );
+                        match eval.recv::<String>().await {
+                            Ok(s) => {
+                                if let Ok(pct) = s.parse::<f64>() {
+                                    if pct < 0.0 || pct >= 1.0 { break; }
+                                    app_poll.download_progress.set(Some(pct));
+                                    continue;
+                                }
+                            }
+                            _ => {}
+                        }
+                        break;
+                    }
+                    app_poll.download_progress.set(None);
+                });
+            };
+            let onclick_later = move |_| app.update_info.set(None);
+            rsx! {
+                div { class: "update-overlay",
+                    div { class: "update-dialog",
+                        div { class: "update-title", "發現新版本" }
+                        div { class: "update-body", "v{tag} 已發布，是否下載更新？" }
+                        div { class: "update-actions",
+                            button { class: "update-btn secondary", onclick: onclick_later, "稍後" }
+                            button { class: "update-btn primary", onclick: onclick_update, "更新" }
+                        }
+                    }
+                }
+            }
+        })}
+
+        // download progress dialog
+        {download_progress.as_ref().map(|&pct| {
+            let display = (pct * 100.0) as u32;
+            rsx! {
+                div { class: "update-overlay",
+                    div { class: "update-dialog",
+                        div { class: "update-title", "正在下載更新…" }
+                        div { class: "update-body dl-progress-body",
+                            span { class: "material-symbols-outlined update-dl-icon", "download" }
+                            " {display}%"
+                        }
+                        div { class: "dl-track",
+                            div { class: "dl-fill", style: "width: {display}%" }
+                        }
+                    }
+                }
+            }
+        })}
     }
 }
 

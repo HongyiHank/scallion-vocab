@@ -66,6 +66,15 @@ if [ -f "$OLD_VECTOR" ]; then
     rm -v "$OLD_VECTOR"
 fi
 
+# Copy FileProvider config
+echo "  → xml/provider_paths.xml"
+mkdir -p "$TARGET_RES/xml"
+cp -v "$SRC_RES/xml/provider_paths.xml" "$TARGET_RES/xml/provider_paths.xml"
+
+# Patch AndroidManifest.xml: add install permission + FileProvider
+echo "  → AndroidManifest.xml (permission + FileProvider)"
+python3 "$SCRIPT_DIR/patch-manifest.py" "$TARGET_MANIFEST"
+
 # Patch Kotlin source files
 echo "  → kotlin/dev/dioxus/main/WryActivity.kt"
 cp -v "$SRC_KOTLIN/dev/dioxus/main/WryActivity.kt" \
