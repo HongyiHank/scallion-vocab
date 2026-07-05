@@ -166,8 +166,8 @@ fn App() -> Element {
         let mut app_clone = app;
         spawn(async move {
             let js = format!(
-                    r#"fetch('https://api.github.com/repos/{repo}/releases/latest',{{headers:{{'Accept':'application/json','User-Agent':'scallion-vocab'}}}}).then(r=>r.json()).then(d=>{{var info=JSON.stringify({{tag:d.tag_name||'',url:(d.assets&&d.assets[0])?d.assets[0].browser_download_url:'',size:(d.assets&&d.assets[0])?d.assets[0].size:0}});dioxus.send(info)}}).catch(function(){{dioxus.send('')}});"#,
-                repo = GH_REPO
+                    r#"var sv=JSON.parse(localStorage.getItem('skipped_versions')||'[]');fetch('https://api.github.com/repos/{repo}/releases/latest',{{headers:{{'Accept':'application/json','User-Agent':'scallion-vocab'}}}}).then(r=>r.json()).then(d=>{{var tag=d.tag_name||'';if(sv.includes(tag)){{dioxus.send('');return;}}var info=JSON.stringify({{tag:tag,url:(d.assets&&d.assets[0])?d.assets[0].browser_download_url:'',size:(d.assets&&d.assets[0])?d.assets[0].size:0}});dioxus.send(info)}}).catch(function(){{dioxus.send('')}});"#,
+                    repo = GH_REPO
             );
             let mut eval = document::eval(&js);
             match eval.recv::<String>().await {
@@ -298,12 +298,26 @@ fn App() -> Element {
                 });
             };
             let onclick_later = move |_| app.update_info.set(None);
+            let skip_tag = info.tag.clone();
+            let onclick_skip = move |_| {
+                app.update_info.set(None);
+                let tag = skip_tag.clone();
+                spawn(async move {
+                    // flat JSON array in localStorage, no dedup needed at read
+                    let js = format!(
+                        r#"try{{var s=JSON.parse(localStorage.getItem('skipped_versions')||'[]');if(!s.includes('{t}')){{s.push('{t}');localStorage.setItem('skipped_versions',JSON.stringify(s));}}}}catch(e){{}}"#,
+                        t = tag.replace('\'', "\\'"),
+                    );
+                    let _ = document::eval(&js).await;
+                });
+            };
             rsx! {
                 div { class: "update-overlay",
                     div { class: "update-dialog",
                         div { class: "update-title", "發現新版本" }
                         div { class: "update-body", "v{tag} 已發布，是否下載更新？" }
                         div { class: "update-actions",
+                            button { class: "update-btn secondary", onclick: onclick_skip, "略過" }
                             button { class: "update-btn secondary", onclick: onclick_later, "稍後" }
                             button { class: "update-btn primary", onclick: onclick_update, "更新" }
                         }
