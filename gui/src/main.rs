@@ -62,6 +62,7 @@ struct AppSignals {
     recent_urls: Signal<Vec<String>>,
     update_info: Signal<Option<UpdateInfo>>,
     download_progress: Signal<Option<f64>>,
+    show_reset_confirm: Signal<bool>,
 }
 
 fn push_toast(mut app: AppSignals, msg: impl Into<String>) {
@@ -71,6 +72,21 @@ fn push_toast(mut app: AppSignals, msg: impl Into<String>) {
         id,
         text: msg.into(),
     }));
+}
+
+#[component]
+fn ModalDialog(visible: bool, title: String, children: Element) -> Element {
+    if !visible {
+        return VNode::empty();
+    }
+    rsx! {
+        div { class: "update-overlay",
+            div { class: "update-dialog",
+                div { class: "update-title", "{title}" }
+                {children}
+            }
+        }
+    }
 }
 
 #[allow(non_snake_case)]
@@ -90,6 +106,7 @@ fn App() -> Element {
         recent_urls: Signal::new(Vec::new()),
         update_info: Signal::new(None),
         download_progress: Signal::new(None),
+        show_reset_confirm: Signal::new(false),
     });
 
     let mut app = use_context::<AppSignals>();
@@ -312,15 +329,14 @@ fn App() -> Element {
                 });
             };
             rsx! {
-                div { class: "update-overlay",
-                    div { class: "update-dialog",
-                        div { class: "update-title", "發現新版本" }
-                        div { class: "update-body", "v{tag} 已發布，是否下載更新？" }
-                        div { class: "update-actions",
-                            button { class: "update-btn secondary", onclick: onclick_skip, "略過" }
-                            button { class: "update-btn secondary", onclick: onclick_later, "稍後" }
-                            button { class: "update-btn primary", onclick: onclick_update, "更新" }
-                        }
+                ModalDialog {
+                    visible: true,
+                    title: "發現新版本",
+                    div { class: "update-body", "v{tag} 已發布，是否下載更新？" }
+                    div { class: "update-actions",
+                        button { class: "update-btn secondary", onclick: onclick_skip, "略過" }
+                        button { class: "update-btn secondary", onclick: onclick_later, "稍後" }
+                        button { class: "update-btn primary", onclick: onclick_update, "更新" }
                     }
                 }
             }
@@ -344,6 +360,32 @@ fn App() -> Element {
                 }
             }
         })}
+
+        // reset confirmation dialog
+        ModalDialog {
+            visible: *app.show_reset_confirm.read(),
+            title: "還原設定",
+            div { class: "update-body", "確定要還原所有設定為預設值嗎？" }
+            div { class: "update-actions",
+                button {
+                    class: "update-btn secondary",
+                    onclick: move |_| app.show_reset_confirm.set(false),
+                    "取消"
+                }
+                button {
+                    class: "update-btn primary",
+                    onclick: move |_| {
+                        app.fsrs_config.set(FsrsConfig::default());
+                        app.theme_mode.set(ThemeMode::System);
+                        app.infinite_mode.set(true);
+                        app.auto_advance_ms.set(DEFAULT_AUTO_ADVANCE_MS);
+                        push_toast(app, "已還原預設值");
+                        app.show_reset_confirm.set(false);
+                    },
+                    "確定"
+                }
+            }
+        }
     }
 }
 
@@ -1039,13 +1081,7 @@ fn UploadScreen() -> Element {
                     button {
                         class: "settings-topbar-btn",
                         title: "還原預設值",
-                        onclick: move |_| {
-                            app.fsrs_config.set(FsrsConfig::default());
-                            app.theme_mode.set(ThemeMode::System);
-                            app.infinite_mode.set(true);
-                            app.auto_advance_ms.set(DEFAULT_AUTO_ADVANCE_MS);
-                            push_toast(app, "已還原預設值");
-                        },
+                        onclick: move |_| app.show_reset_confirm.set(true),
                         span { class: "material-symbols-outlined", "restart_alt" }
                     }
                     button {
