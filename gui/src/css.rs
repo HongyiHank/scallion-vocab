@@ -1,6 +1,6 @@
 pub const STYLES: &str = r#"
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&family=Space+Grotesk:wght@400;600;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&display=block');
 
 :root {
   --md-source: #279b57;
