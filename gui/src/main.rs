@@ -1303,7 +1303,7 @@ fn UploadScreen() -> Element {
                             }
                         }
                     }
-                    span { class: "settings-version", "v1.1" }
+                    span { class: "settings-version", "v{APP_VERSION}" }
                 }
             }
         }
