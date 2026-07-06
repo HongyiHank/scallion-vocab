@@ -21,16 +21,22 @@ if [ "${INSIDE_VOC_BUILDER:-}" != "1" ]; then
     keystore_dir="$(dirname "$keystore_file")"
     keystore_basename="$(basename "$keystore_file")"
 
-    # Auto-detect key alias from keystore (fallback to debug defaults)
     if [ -f "$keystore_file" ]; then
         key_alias=$(keytool -list -v -keystore "$keystore_file" -storepass "$keystore_pass" 2>/dev/null \
             | grep -oP '(?<=^(Alias name|別名名稱): ).*')
     fi
     : "${key_alias:=androiddebugkey}"
+    keystore_default="$HOME/.android/debug.keystore"
+    if [ "$keystore_file" = "$keystore_default" ] && [ ! -f "$keystore_file" ]; then
+        keystore_mount=
+    else
+        mkdir -p "$(dirname "$keystore_file")"
+        keystore_mount="$keystore_dir"
+    fi
 
     # Ensure host cache directories exist (bind mount source must exist)
     mkdir -p "${HOME}/.gradle" "${HOME}/.cache/sccache" \
-        "${HOME}/.cargo/registry" "${HOME}/.cargo/git" "$keystore_dir" \
+        "${HOME}/.cargo/registry" "${HOME}/.cargo/git" \
         "${PROJECT_ROOT}/gui/target"
 
     if [ "${VOC_BUILDER_DAEMON:-}" = "1" ]; then
@@ -44,7 +50,7 @@ if [ "${INSIDE_VOC_BUILDER:-}" != "1" ]; then
                 -v "${HOME}/.cargo/git:/root/.cargo/git:rslave" \
                 -v "${HOME}/.gradle:/root/.gradle:rslave" \
                 -v "${HOME}/.cache/sccache:/root/.cache/sccache:rslave" \
-                -v "${keystore_dir}:/root/.android:rslave" \
+                ${keystore_mount:+-v "${keystore_dir}:/root/.android:rslave"} \
                 -e INSIDE_VOC_BUILDER=1 \
                 -e KEYSTORE_FILE="${keystore_basename}" \
                 -e KEYSTORE_PASS="${keystore_pass}" \
@@ -65,7 +71,7 @@ if [ "${INSIDE_VOC_BUILDER:-}" != "1" ]; then
         -v "${HOME}/.cargo/git:/root/.cargo/git:rslave" \
         -v "${HOME}/.gradle:/root/.gradle:rslave" \
         -v "${HOME}/.cache/sccache:/root/.cache/sccache:rslave" \
-        -v "${keystore_dir}:/root/.android:rslave" \
+        ${keystore_mount:+-v "${keystore_dir}:/root/.android:rslave"} \
         -e INSIDE_VOC_BUILDER=1 \
         -e KEYSTORE_FILE="${keystore_basename}" \
         -e KEYSTORE_PASS="${keystore_pass}" \
