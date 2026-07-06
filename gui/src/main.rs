@@ -63,6 +63,7 @@ struct AppSignals {
     update_info: Signal<Option<UpdateInfo>>,
     download_progress: Signal<Option<f64>>,
     show_reset_confirm: Signal<bool>,
+    update_check_enabled: Signal<bool>,
 }
 
 fn push_toast(mut app: AppSignals, msg: impl Into<String>) {
@@ -107,6 +108,7 @@ fn App() -> Element {
         update_info: Signal::new(None),
         download_progress: Signal::new(None),
         show_reset_confirm: Signal::new(false),
+        update_check_enabled: Signal::new(true),
     });
 
     let mut app = use_context::<AppSignals>();
@@ -152,12 +154,14 @@ fn App() -> Element {
         let show_finished = *app.show_finished_screen.read();
         let cfg = app.fsrs_config.cloned();
         let ms = *app.auto_advance_ms.read();
+        let uc = *app.update_check_enabled.read();
 
         spawn(async move {
             persist_infinite_mode(infinite).await;
             persist_show_finished_screen(show_finished).await;
             persist_fsrs_config(cfg).await;
             persist_auto_advance_ms(ms).await;
+            persist_update_check_enabled(uc).await;
         });
     });
 
@@ -175,9 +179,9 @@ fn App() -> Element {
         });
     });
 
-    // Check for updates on launch (after prefs loaded).
+    // Check for updates on launch (after prefs loaded, if enabled).
     use_effect(move || {
-        if !*app.prefs_loaded.read() {
+        if !*app.prefs_loaded.read() || !*app.update_check_enabled.read() {
             return;
         }
         let mut app_clone = app;
@@ -379,6 +383,7 @@ fn App() -> Element {
                         app.theme_mode.set(ThemeMode::System);
                         app.infinite_mode.set(true);
                         app.auto_advance_ms.set(DEFAULT_AUTO_ADVANCE_MS);
+                        app.update_check_enabled.set(true);
                         push_toast(app, "已還原預設值");
                         app.show_reset_confirm.set(false);
                     },
@@ -398,6 +403,7 @@ struct StoredPrefs {
     show_finished_screen: Option<bool>,
     auto_advance_ms: Option<i64>,
     fsrs_config: Option<String>,
+    update_check_enabled: Option<bool>,
 }
 
 async fn load_prefs(mut app: AppSignals) {
@@ -415,10 +421,11 @@ async fn load_prefs(mut app: AppSignals) {
             const infinite_mode = localStorage.getItem('infinite_mode') !== 'false';
             const auto_advance_ms = parseInt(localStorage.getItem('auto_advance_ms'), 10) || null;
             const fsrs_config = localStorage.getItem('fsrs_config') || '';
-            dioxus.send(JSON.stringify({ theme, resolved_dark: resolved === 'dark', urls: Array.isArray(urls) ? urls : [], infinite_mode, auto_advance_ms, fsrs_config }));
+            const update_check_enabled = localStorage.getItem('update_check_enabled') !== 'false';
+            dioxus.send(JSON.stringify({ theme, resolved_dark: resolved === 'dark', urls: Array.isArray(urls) ? urls : [], infinite_mode, auto_advance_ms, fsrs_config, update_check_enabled }));
         } catch (_) {
             document.documentElement.setAttribute('data-theme', 'light');
-            dioxus.send(JSON.stringify({ theme: 'system', resolved_dark: false, urls: [], infinite_mode: true, auto_advance_ms: null, fsrs_config: '' }));
+            dioxus.send(JSON.stringify({ theme: 'system', resolved_dark: false, urls: [], infinite_mode: true, auto_advance_ms: null, fsrs_config: '', update_check_enabled: true }));
         }
         "#,
     );
@@ -442,6 +449,9 @@ async fn load_prefs(mut app: AppSignals) {
                 if let Ok(cfg) = serde_json::from_str::<FsrsConfig>(&json) {
                     app.fsrs_config.set(cfg);
                 }
+            }
+            if let Some(v) = prefs.update_check_enabled {
+                app.update_check_enabled.set(v);
             }
         } else {
             log!("[Prefs::Load] failed to parse prefs payload");
@@ -519,6 +529,17 @@ async fn persist_auto_advance_ms(ms: i64) {
     );
     if let Err(e) = document::eval(&js).await {
         log!("[Prefs::AutoAdvanceMs] save failed: {e}");
+    }
+}
+
+async fn persist_update_check_enabled(enabled: bool) {
+    let js = if enabled {
+        r#"try { localStorage.removeItem('update_check_enabled'); } catch(_) {}"#.to_string()
+    } else {
+        r#"try { localStorage.setItem('update_check_enabled', 'false'); } catch(_) {}"#.to_string()
+    };
+    if let Err(e) = document::eval(&js).await {
+        log!("[Prefs::UpdateCheck] save failed: {e}");
     }
 }
 
@@ -1129,6 +1150,20 @@ fn UploadScreen() -> Element {
                                 onclick: move |_| app.theme_mode.set(ThemeMode::Dark),
                                 span { class: "material-symbols-outlined", "dark_mode" }
                                 span { "深色" }
+                            }
+                        }
+                        div {
+                            class: "settings-item",
+                            onclick: move |_| {
+                                let new_val = !*app.update_check_enabled.read();
+                                app.update_check_enabled.set(new_val);
+                            },
+                            div { class: "settings-item-icon",
+                                span { class: "material-symbols-outlined", "system_update" }
+                            }
+                            div { class: "settings-item-label", "更新檢測" }
+                            div {
+                                class: if *app.update_check_enabled.read() { "settings-switch on" } else { "settings-switch" },
                             }
                         }
                     }
