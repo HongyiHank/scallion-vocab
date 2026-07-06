@@ -1166,6 +1166,40 @@ fn UploadScreen() -> Element {
                                 class: if *app.update_check_enabled.read() { "settings-switch on" } else { "settings-switch" },
                             }
                         }
+                        div {
+                            class: "settings-item",
+                            onclick: move |_| {
+                                spawn(async move {
+                                    // no skipped_versions check — manual check always shows the dialog
+                                    let js = format!(
+                                        r#"fetch('https://api.github.com/repos/{repo}/releases/latest',{{headers:{{'Accept':'application/json','User-Agent':'scallion-vocab'}}}}).then(r=>r.json()).then(d=>{{var tag=d.tag_name||'';var info=JSON.stringify({{tag:tag,url:(d.assets&&d.assets[0])?d.assets[0].browser_download_url:'',size:(d.assets&&d.assets[0])?d.assets[0].size:0}});dioxus.send(info)}}).catch(function(){{dioxus.send('')}});"#,
+                                        repo = GH_REPO
+                                    );
+                                    let mut eval = document::eval(&js);
+                                    match eval.recv::<String>().await {
+                                        Ok(json) if !json.is_empty() => {
+                                            if let Ok(info) = serde_json::from_str::<UpdateInfo>(&json) {
+                                                if !info.tag.is_empty()
+                                                    && !info.url.is_empty()
+                                                    && parse_version(&info.tag).map_or(false, |v| {
+                                                        parse_version(APP_VERSION).map_or(true, |cur| v > cur)
+                                                    })
+                                                {
+                                                    app.update_info.set(Some(info));
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                    push_toast(app, "已是最新版本");
+                                });
+                            },
+                            div { class: "settings-item-icon",
+                                span { class: "material-symbols-outlined", "update" }
+                            }
+                            div { class: "settings-item-label", "檢查更新" }
+                        }
                     }
                 } else if *settings_tab.read() == 1 {
                     div { class: "settings-body",
