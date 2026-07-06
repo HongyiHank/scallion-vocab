@@ -30,7 +30,8 @@ if [ "${INSIDE_VOC_BUILDER:-}" != "1" ]; then
 
     # Ensure host cache directories exist (bind mount source must exist)
     mkdir -p "${HOME}/.gradle" "${HOME}/.cache/sccache" \
-        "${HOME}/.cargo/registry" "${HOME}/.cargo/git" "$keystore_dir"
+        "${HOME}/.cargo/registry" "${HOME}/.cargo/git" "$keystore_dir" \
+        "${PROJECT_ROOT}/gui/target"
 
     if [ "${VOC_BUILDER_DAEMON:-}" = "1" ]; then
         if "${RUNNER[@]}" container exists "$container_name"; then
