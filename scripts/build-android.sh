@@ -174,6 +174,7 @@ echo ""
 
 echo "=== Step 3: Rebuilding APK ==="
 cd "$GRADLE_DIR"
+chmod +x gradlew 2>/dev/null || true
 ./gradlew assembleRelease -x lintVitalAnalyzeRelease 2>&1
 cd "$PROJECT_ROOT"
 echo ""
