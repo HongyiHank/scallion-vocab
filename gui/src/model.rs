@@ -116,6 +116,8 @@ pub enum Screen {
     Upload,
     Quiz,
     QuizFinished,
+    Library,
+    Settings,
 }
 
 #[derive(Clone, Debug)]

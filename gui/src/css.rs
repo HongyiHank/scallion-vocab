@@ -228,7 +228,6 @@ body {
     color: var(--md-sys-color-on-surface);
     height: 100dvh; min-height: 100dvh;
     display: flex; justify-content: center; align-items: center;
-    padding: 12px; padding-bottom: calc(12px + var(--safe-bottom));
     overflow: hidden; position: relative;
     -webkit-tap-highlight-color: transparent;
     transition: background-color var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-emphasized), color var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-emphasized);
@@ -648,11 +647,11 @@ button.history-item:active { transform: scale(0.98); }
 }
 .settings-topbar {
     display: flex; align-items: center; gap: 4px; padding: 8px 4px;
-    min-height: 64px; border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    min-height: 64px;
     font-size: 1.2em; font-weight: 500;
 }
 .settings-topbar-title {
-    flex: 1; font-size: 1em; font-weight: 500; padding-left: 4px;
+    flex: 1; font-size: 28px; font-weight: 400; padding-left: 4px;
 }
 .settings-topbar-btn {
     width: 40px; height: 40px; border: none; border-radius: 50%;
@@ -674,11 +673,11 @@ button.history-item:active { transform: scale(0.98); }
     .settings-close:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
 }
 .settings-body {
-    padding: 8px 16px; flex: 1; overflow-y: auto;
+    padding: 16px 24px; flex: 1; overflow-y: auto;
 }
 .settings-item {
     display: flex; align-items: center; gap: 16px;
-    padding: 12px 8px; border-radius: var(--shape-medium);
+    padding: 16px 12px; border-radius: var(--shape-medium);
     cursor: pointer; transition: background var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
 }
 @media (hover: hover) {
@@ -721,12 +720,12 @@ button.history-item:active { transform: scale(0.98); }
 .settings-section-label {
     font-size: .75em; font-weight: 500; text-transform: uppercase; letter-spacing: .1em;
     color: var(--md-sys-color-on-surface-variant);
-    padding: 4px 8px; margin-bottom: 8px;
+    padding: 4px 8px; margin-bottom: 12px;
 }
 .theme-segmented {
     display: flex; border: 1px solid var(--md-sys-color-outline);
     border-radius: var(--shape-full); overflow: hidden;
-    margin-bottom: 8px;
+    margin-bottom: 12px;
 }
 .theme-btn {
     flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
@@ -752,27 +751,12 @@ button.history-item:active { transform: scale(0.98); }
     }
 }
 
-/* ── Settings bottom (GitHub icon + version) ── */
-.settings-bottom {
-    display: flex; flex-direction: column; align-items: center; gap: 4px;
-    padding: 16px 16px calc(16px + var(--safe-bottom));
-    border-top: 1px solid var(--md-sys-color-outline-variant);
-}
-.settings-github-icon {
-    width: 40px; height: 40px; border-radius: 50%;
-    border: none; background: transparent;
-    display: flex; align-items: center; justify-content: center;
-    color: var(--md-sys-color-on-surface-variant);
-    cursor: pointer; text-decoration: none;
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
-}
-@media (hover: hover) {
-    .settings-github-icon:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
-}
-.settings-github-icon svg { width: 24px; height: 24px; }
+/* ── Version label in settings body ── */
 .settings-version {
-    font-size: .75em; color: var(--md-sys-color-on-surface-variant);
-    opacity: .6;
+    text-align: right;
+    padding: 8px 24px 12px;
+    font-size: 12px;
+    color: var(--md-sys-color-on-surface-variant);
 }
 
 /* ── License dialog ── */
@@ -961,11 +945,11 @@ button.history-item:active { transform: scale(0.98); }
 
 /* ── Settings tabs ── */
 .settings-tabs {
-    display: flex; gap: 0; padding: 0 16px; margin-top: 8px;
+    display: flex; gap: 0; padding: 0 24px; margin-top: 8px;
     border-bottom: 1px solid var(--md-sys-color-outline-variant);
 }
 .settings-tab {
-    padding: 10px 20px; border: none; background: transparent;
+    flex: 1; padding: 10px 0 8px; border: none; background: transparent;
     font-size: .9em; font-weight: 500; font-family: inherit;
     color: var(--md-sys-color-on-surface-variant); cursor: pointer;
     border-bottom: 2px solid transparent; transition: all var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
@@ -1123,5 +1107,83 @@ button.history-item:active { transform: scale(0.98); }
     border-radius: 3px;
     transition: width 250ms cubic-bezier(0.2,0,0,1);
     transform-origin: left;
+}
+
+/* ── App shell (NavBar layout) ── */
+.app-shell {
+    width: 100%; height: 100dvh;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+}
+.app-content {
+    flex: 1; display: flex; justify-content: center; align-items: center;
+    overflow: hidden; position: relative;
+    padding: 12px; padding-bottom: calc(12px + var(--safe-bottom));
+}
+
+/* ── Bottom navigation bar ── */
+.navbar {
+    display: flex; justify-content: space-around; align-items: center;
+    background: var(--md-sys-color-surface-container);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+    padding: 4px 8px;
+    padding-bottom: calc(4px + var(--safe-bottom));
+    min-height: 64px; z-index: 100; flex-shrink: 0;
+}
+.nav-item {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 6px 16px 4px; border: none; background: transparent;
+    font-family: inherit; cursor: pointer; min-width: 64px;
+    border-radius: var(--shape-sm);
+    transition: background var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
+}
+@media (hover: hover) {
+    .nav-item:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 6%, transparent); }
+}
+.nav-item:active { background: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent); }
+.nav-icon {
+    font-size: 1.5em; color: var(--md-sys-color-on-surface-variant);
+    font-variation-settings: 'FILL' 0;
+    transition: color var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
+}
+.nav-item.active .nav-icon {
+    color: var(--md-sys-color-primary);
+    font-variation-settings: 'FILL' 1;
+}
+.nav-label {
+    font-size: .65em; font-weight: 500;
+    color: var(--md-sys-color-on-surface-variant);
+    transition: color var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
+}
+.nav-item.active .nav-label {
+    color: var(--md-sys-color-primary);
+}
+
+/* ── Library screen ── */
+.library-screen {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    flex: 1; text-align: center; gap: 16px; padding: 24px;
+    animation: fadeUp var(--md-sys-motion-duration-long3) var(--md-sys-motion-easing-emphasized-decelerate);
+}
+.library-icon {
+    font-size: 3.5em; color: var(--md-sys-color-on-surface-variant); opacity: .5;
+    width: 96px; height: 96px; border-radius: 50%;
+    background: var(--md-sys-color-surface-container-high);
+    display: flex; align-items: center; justify-content: center;
+}
+.library-title {
+    font-size: 1.3em; font-weight: 600; color: var(--md-sys-color-on-surface);
+}
+.library-subtitle {
+    font-size: .9em; color: var(--md-sys-color-on-surface-variant); line-height: 1.5;
+    max-width: 280px;
+}
+
+/* ── Settings screen ── */
+.settings-screen {
+    align-self: stretch; width: 100%;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    animation: fadeUp var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-emphasized-decelerate);
 }
 "#;

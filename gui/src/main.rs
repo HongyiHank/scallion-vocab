@@ -222,8 +222,11 @@ fn App() -> Element {
                 // License list → close
                 el = document.querySelector('.license-dialog-close');
                 if (el) { el.click(); return; }
-                // Settings overlay → close
+                // Settings screen → back to Upload
                 el = document.querySelector('.settings-close');
+                if (el) { el.click(); return; }
+                // Library screen → back to Upload
+                el = document.querySelector('.library-close');
                 if (el) { el.click(); return; }
                 // HTML fallback → cancel (text-btn inside fallback-actions)
                 el = document.querySelector('.html-fallback');
@@ -259,17 +262,19 @@ fn App() -> Element {
             dangerous_inner_html: ANTI_FOUC_SCRIPT,
         }
 
-        div {
-            width: "100%",
-            display: "flex",
-            justify_content: "center",
-            align_items: "center",
-            min_height: "100dvh",
-
+        div { class: "app-shell",
+            div { class: "app-content",
+                match screen {
+                    Screen::Upload => rsx! { UploadScreen {} },
+                    Screen::Quiz => rsx! { QuizScreen {} },
+                    Screen::QuizFinished => rsx! { QuizFinished {} },
+                    Screen::Library => rsx! { LibraryScreen {} },
+                    Screen::Settings => rsx! { SettingsScreen {} },
+                }
+            }
             match screen {
-                Screen::Upload => rsx! { UploadScreen {} },
-                Screen::Quiz => rsx! { QuizScreen {} },
-                Screen::QuizFinished => rsx! { QuizFinished {} },
+                Screen::Upload | Screen::Library | Screen::Settings => rsx! { NavBar {} },
+                _ => rsx! {},
             }
         }
 
@@ -693,11 +698,6 @@ fn UploadScreen() -> Element {
 
     let has_urls = url_text.read().lines().any(|l| !l.trim().is_empty());
 
-    let mut show_settings = use_signal(|| false);
-    let mut show_licenses = use_signal(|| false);
-    let mut selected_dep_name = use_signal(String::new);
-    let mut selected_dep_license = use_signal(String::new);
-    let mut settings_tab = use_signal(|| 0); // 0 = 一般, 1 = 考試, 2 = FSRS
     let auto_resize_textarea = move || {
         spawn(async move {
             let _ = document::eval(
@@ -901,23 +901,7 @@ fn UploadScreen() -> Element {
 
     let recent_urls = app.recent_urls.cloned();
 
-    let show_detail = !selected_dep_name.read().is_empty();
-    let detail_name = match show_detail {
-        true => selected_dep_name.read().clone(),
-        false => String::new(),
-    };
-    let detail_text = match show_detail {
-        true => licenses::get_license_text(&selected_dep_license.read()).to_owned(),
-        false => String::new(),
-    };
-
     rsx! {
-        button {
-            class: "top-icon-btn",
-            style: "left: 20px;",
-            onclick: move |_| show_settings.set(true),
-            span { class: "material-symbols-outlined", "settings" }
-        }
         div { class: "upload-wrapper",
             section { class: "upload-container",
                 h2 { "青蔥背單字" }
@@ -1090,277 +1074,6 @@ fn UploadScreen() -> Element {
                 }
             }
         }
-        if *show_settings.read() {
-            div { class: "settings-overlay",
-                div { class: "settings-topbar",
-                    button {
-                        class: "settings-close",
-                        onclick: move |_| show_settings.set(false),
-                        span { class: "material-symbols-outlined", "arrow_back" }
-                    }
-                    span { class: "settings-topbar-title", "設定" }
-                    button {
-                        class: "settings-topbar-btn",
-                        title: "還原預設值",
-                        onclick: move |_| app.show_reset_confirm.set(true),
-                        span { class: "material-symbols-outlined", "restart_alt" }
-                    }
-                    button {
-                        class: "settings-topbar-btn",
-                        title: "開源許可證",
-                        onclick: move |_| show_licenses.set(true),
-                        span { class: "material-symbols-outlined", "description" }
-                    }
-                }
-                div { class: "settings-tabs",
-                    button {
-                        class: if *settings_tab.read() == 0 { "settings-tab active" } else { "settings-tab" },
-                        onclick: move |_| settings_tab.set(0),
-                        "一般"
-                    }
-                    button {
-                        class: if *settings_tab.read() == 1 { "settings-tab active" } else { "settings-tab" },
-                        onclick: move |_| settings_tab.set(1),
-                        "考試"
-                    }
-                    button {
-                        class: if *settings_tab.read() == 2 { "settings-tab active" } else { "settings-tab" },
-                        onclick: move |_| settings_tab.set(2),
-                        "FSRS"
-                    }
-                }
-                if *settings_tab.read() == 0 {
-                    div { class: "settings-body",
-                        div { class: "settings-section-label", "主題" }
-                        div { class: "theme-segmented",
-                            button {
-                                class: if *app.theme_mode.read() == ThemeMode::Light { "theme-btn active" } else { "theme-btn" },
-                                onclick: move |_| app.theme_mode.set(ThemeMode::Light),
-                                span { class: "material-symbols-outlined", "light_mode" }
-                                span { "淺色" }
-                            }
-                            button {
-                                class: if *app.theme_mode.read() == ThemeMode::System { "theme-btn active" } else { "theme-btn" },
-                                onclick: move |_| app.theme_mode.set(ThemeMode::System),
-                                span { class: "material-symbols-outlined", "settings_brightness" }
-                                span { "系統" }
-                            }
-                            button {
-                                class: if *app.theme_mode.read() == ThemeMode::Dark { "theme-btn active" } else { "theme-btn" },
-                                onclick: move |_| app.theme_mode.set(ThemeMode::Dark),
-                                span { class: "material-symbols-outlined", "dark_mode" }
-                                span { "深色" }
-                            }
-                        }
-                        div {
-                            class: "settings-item",
-                            onclick: move |_| {
-                                let new_val = !*app.update_check_enabled.read();
-                                app.update_check_enabled.set(new_val);
-                            },
-                            div { class: "settings-item-icon",
-                                span { class: "material-symbols-outlined", "system_update" }
-                            }
-                            div { class: "settings-item-label", "更新檢測" }
-                            div {
-                                class: if *app.update_check_enabled.read() { "settings-switch on" } else { "settings-switch" },
-                            }
-                        }
-                        div {
-                            class: "settings-item",
-                            onclick: move |_| {
-                                spawn(async move {
-                                    // no skipped_versions check — manual check always shows the dialog
-                                    let js = format!(
-                                        r#"fetch('https://api.github.com/repos/{repo}/releases/latest',{{headers:{{'Accept':'application/json','User-Agent':'scallion-vocab'}}}}).then(r=>r.json()).then(d=>{{var tag=d.tag_name||'';var info=JSON.stringify({{tag:tag,url:(d.assets&&d.assets[0])?d.assets[0].browser_download_url:'',size:(d.assets&&d.assets[0])?d.assets[0].size:0}});dioxus.send(info)}}).catch(function(){{dioxus.send('')}});"#,
-                                        repo = GH_REPO
-                                    );
-                                    let mut eval = document::eval(&js);
-                                    match eval.recv::<String>().await {
-                                        Ok(json) if !json.is_empty() => {
-                                            if let Ok(info) = serde_json::from_str::<UpdateInfo>(&json) {
-                                                if !info.tag.is_empty()
-                                                    && !info.url.is_empty()
-                                                    && parse_version(&info.tag).map_or(false, |v| {
-                                                        parse_version(APP_VERSION).map_or(true, |cur| v > cur)
-                                                    })
-                                                {
-                                                    app.update_info.set(Some(info));
-                                                    return;
-                                                }
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                    push_toast(app, "已是最新版本");
-                                });
-                            },
-                            div { class: "settings-item-icon",
-                                span { class: "material-symbols-outlined", "update" }
-                            }
-                            div { class: "settings-item-label", "檢查更新" }
-                        }
-                    }
-                } else if *settings_tab.read() == 1 {
-                    div { class: "settings-body",
-                        div {
-                            class: "settings-item",
-                            onclick: move |_| {
-                                let new_val = !*app.infinite_mode.read();
-                                app.infinite_mode.set(new_val);
-                            },
-                            div { class: "settings-item-icon",
-                                span { class: "material-symbols-outlined", "all_inclusive" }
-                            }
-                            div { class: "settings-item-label", "無限考試" }
-                            div {
-                                class: if *app.infinite_mode.read() { "settings-switch on" } else { "settings-switch" },
-                            }
-                        }
-                        div {
-                            class: "settings-item",
-                            onclick: move |_| {
-                                let mut c = app.fsrs_config.cloned();
-                                c.review_wrong = !c.review_wrong;
-                                app.fsrs_config.set(c);
-                            },
-                            div { class: "settings-item-icon",
-                                span { class: "material-symbols-outlined", "refresh" }
-                            }
-                            div { class: "settings-item-label",
-                                div { "重複出現錯題" }
-                                div { class: "settings-item-sub", "關閉時錯題不加入複習佇列，優先於 FSRS 設定" }
-                            }
-                            div {
-                                class: if app.fsrs_config.read().review_wrong { "settings-switch on" } else { "settings-switch" },
-                            }
-                        }
-                        div {
-                            class: "settings-item",
-                            onclick: move |_| {
-                                let new_val = !*app.show_finished_screen.read();
-                                app.show_finished_screen.set(new_val);
-                            },
-                            div { class: "settings-item-icon",
-                                span { class: "material-symbols-outlined", "celebration" }
-                            }
-                            div { class: "settings-item-label",
-                                div { "是否啟用結算分數" }
-                                div { class: "settings-item-sub", "此設定僅在關閉無限考試時生效" }
-                            }
-                            div {
-                                class: if *app.show_finished_screen.read() { "settings-switch on" } else { "settings-switch" },
-                            }
-                        }
-                        div {
-                            class: "settings-item",
-                            style: "cursor: default;",
-                            div { class: "settings-item-icon",
-                                span { class: "material-symbols-outlined", "timer" }
-                            }
-                            div { class: "settings-item-label",
-                                div { "自動跳題時間" }
-                                div { class: "settings-item-sub", "設為負數則關閉" }
-                            }
-                            input {
-                                class: "fsrs-input",
-                                style: "width: 100px; flex-shrink: 0; text-align: right;",
-                                r#type: "number",
-                                value: "{app.auto_advance_ms.read()}",
-                                oninput: move |e| {
-                                    let v = e.value().trim().to_string();
-                                    if v.is_empty() { return; }
-                                    if let Ok(n) = v.parse::<i64>() {
-                                        app.auto_advance_ms.set(n);
-                                    }
-                                },
-                            }
-                        }
-                    }
-                } else {
-                    div { class: "settings-body",
-                        FsrsSettings {}
-                    }
-                }
-                div { class: "settings-bottom",
-                    button {
-                        class: "settings-github-icon",
-                        title: "GitHub 原始碼",
-                        onclick: move |_| {
-                            let js = r#"(function(){
-                                if (window.AndroidExternal && typeof window.AndroidExternal.openUrl === 'function') {
-                                    window.AndroidExternal.openUrl("https://github.com/HongyiHank/scallion-vocab");
-                                } else {
-                                    window.open("https://github.com/HongyiHank/scallion-vocab", "_blank", "noopener,noreferrer");
-                                }
-                            })()"#;
-                            spawn(async move { let _ = document::eval(js).await; });
-                        },
-                        svg { width: "24", height: "24", view_box: "0 0 98 96",
-                            path {
-                                fill: "currentColor",
-                                d: "M41.4395 69.3848C28.8066 67.8535 19.9062 58.7617 19.9062 46.9902C19.9062 42.2051 21.6289 37.0371 24.5 33.5918C23.2559 30.4336 23.4473 23.7344 24.8828 20.959C28.7109 20.4805 33.8789 22.4902 36.9414 25.2656C40.5781 24.1172 44.4062 23.543 49.0957 23.543C53.7852 23.543 57.6133 24.1172 61.0586 25.1699C64.0254 22.4902 69.2891 20.4805 73.1172 20.959C74.457 23.543 74.6484 30.2422 73.4043 33.4961C76.4668 37.1328 78.0937 42.0137 78.0937 46.9902C78.0937 58.7617 69.1934 67.6621 56.3691 69.2891C59.623 71.3945 61.8242 75.9883 61.8242 81.252L61.8242 91.2051C61.8242 94.0762 64.2168 95.7031 67.0879 94.5547C84.4102 87.9512 98 70.6289 98 49.1914C98 22.1074 75.9883 6.69539e-07 48.9043 4.309e-07C21.8203 1.92261e-07 -1.9479e-07 22.1074 -4.3343e-07 49.1914C-6.20631e-07 70.4375 13.4941 88.0469 31.6777 94.6504C34.2617 95.6074 36.75 93.8848 36.75 91.3008L36.75 83.6445C35.4102 84.2188 33.6875 84.6016 32.1562 84.6016C25.8398 84.6016 22.1074 81.1563 19.4277 74.7441C18.375 72.1602 17.2266 70.6289 15.0254 70.3418C13.877 70.2461 13.4941 69.7676 13.4941 69.1934C13.4941 68.0449 15.4082 67.1836 17.3223 67.1836C20.0977 67.1836 22.4902 68.9063 24.9785 72.4473C26.8926 75.2227 28.9023 76.4668 31.2949 76.4668C33.6875 76.4668 35.2187 75.6055 37.4199 73.4043C39.0469 71.7773 40.291 70.3418 41.4395 69.3848Z",
-                            }
-                        }
-                    }
-                    span { class: "settings-version", "v{APP_VERSION}" }
-                }
-            }
-        }
-        if *show_licenses.read() {
-            div { class: "license-overlay",
-                div { class: "license-dialog",
-                    div { class: "license-dialog-topbar",
-                        button {
-                            class: "license-dialog-close",
-                            onclick: move |_| show_licenses.set(false),
-                            span { class: "material-symbols-outlined", "close" }
-                        }
-                        span { class: "license-dialog-title", "開源許可證" }
-                    }
-                    div { class: "license-list",
-                        {licenses::ALL_DEPS.iter().map(|dep| {
-                            let n = dep.name.to_owned();
-                            let lf = dep.license_file.to_owned();
-                            rsx! {
-                                button {
-                                    key: "{dep.name}",
-                                    class: "license-item",
-                                    onclick: move |_| {
-                                        selected_dep_name.set(n.clone());
-                                        selected_dep_license.set(lf.clone());
-                                    },
-                                    span { class: "license-item-name", "{dep.name}" }
-                                    span { class: "license-item-type", "{dep.license_display}" }
-                                }
-                            }
-                        })}
-                    }
-                }
-            }
-        }
-        {show_detail.then(|| {
-            let n = detail_name.clone();
-            let t = detail_text.clone();
-            rsx! {
-                div { class: "license-detail-overlay",
-                    div { class: "license-detail-dialog",
-                        div { class: "license-detail-topbar",
-                            button {
-                                class: "license-detail-close",
-                                onclick: move |_| {
-                                    selected_dep_name.set(String::new());
-                                    selected_dep_license.set(String::new());
-                                },
-                                span { class: "material-symbols-outlined", "arrow_back" }
-                            }
-                            span { class: "license-detail-title", "{n}" }
-                        }
-                        div { class: "license-detail-body", "{t}" }
-                    }
-                }
-            }
-        })}
     }
 }
 
@@ -2123,6 +1836,337 @@ fn QuizFinished() -> Element {
                 "返回主頁"
             }
         }
+    }
+}
+
+#[component]
+fn NavBar() -> Element {
+    let mut app = use_context::<AppSignals>();
+    let current = app.screen.read().clone();
+
+    let items = [
+        (Screen::Library, "menu_book", "字庫"),
+        (Screen::Upload, "note_add", "考試"),
+        (Screen::Settings, "settings", "設定"),
+    ];
+
+    rsx! {
+        nav { class: "navbar",
+            {items.into_iter().map(|(screen, icon, label)| {
+                let active = current == screen;
+                let cls = if active { "nav-item active" } else { "nav-item" };
+                rsx! {
+                    button {
+                        key: "{label}",
+                        class: "{cls}",
+                        onclick: move |_| app.screen.set(screen.clone()),
+                        span { class: "nav-icon material-symbols-outlined", "{icon}" }
+                        span { class: "nav-label", "{label}" }
+                    }
+                }
+            })}
+        }
+    }
+}
+
+#[component]
+fn LibraryScreen() -> Element {
+    let mut app = use_context::<AppSignals>();
+    rsx! {
+        button {
+            class: "library-close",
+            style: "position: absolute; opacity: 0; width: 1px; height: 1px; overflow: hidden;",
+            onclick: move |_| app.screen.set(Screen::Upload),
+        }
+        div { class: "library-screen",
+            div { class: "library-icon",
+                span { class: "material-symbols-outlined", "menu_book" }
+            }
+            div { class: "library-title", "字庫" }
+            div { class: "library-subtitle", "待開發" }
+        }
+    }
+}
+
+#[component]
+fn SettingsScreen() -> Element {
+    let mut app = use_context::<AppSignals>();
+    let mut settings_tab = use_signal(|| 0);
+    let mut show_licenses = use_signal(|| false);
+    let mut selected_dep_name = use_signal(String::new);
+    let mut selected_dep_license = use_signal(String::new);
+    let show_detail = !selected_dep_name.read().is_empty();
+    let detail_name = match show_detail {
+        true => selected_dep_name.read().clone(),
+        false => String::new(),
+    };
+    let detail_text = match show_detail {
+        true => licenses::get_license_text(&selected_dep_license.read()).to_owned(),
+        false => String::new(),
+    };
+
+    rsx! {
+        div { class: "settings-screen",
+            div { class: "settings-topbar",
+                span { class: "settings-topbar-title", "設定" }
+                button {
+                    class: "settings-topbar-btn",
+                    title: "還原預設值",
+                    onclick: move |_| app.show_reset_confirm.set(true),
+                    span { class: "material-symbols-outlined", "restart_alt" }
+                }
+                button {
+                    class: "settings-topbar-btn",
+                    title: "開源許可證",
+                    onclick: move |_| show_licenses.set(true),
+                    span { class: "material-symbols-outlined", "description" }
+                }
+                button {
+                    class: "settings-topbar-btn",
+                    title: "GitHub",
+                    onclick: move |_| {
+                        let js = r#"(function(){
+                            if (window.AndroidExternal && typeof window.AndroidExternal.openUrl === 'function') {
+                                window.AndroidExternal.openUrl("https://github.com/HongyiHank/scallion-vocab");
+                            } else {
+                                window.open("https://github.com/HongyiHank/scallion-vocab", "_blank", "noopener,noreferrer");
+                            }
+                        })()"#;
+                        spawn(async move { let _ = document::eval(js).await; });
+                    },
+                    svg { width: "24", height: "24", view_box: "0 0 98 96",
+                        path {
+                            fill: "currentColor",
+                            d: "M41.4395 69.3848C28.8066 67.8535 19.9062 58.7617 19.9062 46.9902C19.9062 42.2051 21.6289 37.0371 24.5 33.5918C23.2559 30.4336 23.4473 23.7344 24.8828 20.959C28.7109 20.4805 33.8789 22.4902 36.9414 25.2656C40.5781 24.1172 44.4062 23.543 49.0957 23.543C53.7852 23.543 57.6133 24.1172 61.0586 25.1699C64.0254 22.4902 69.2891 20.4805 73.1172 20.959C74.457 23.543 74.6484 30.2422 73.4043 33.4961C76.4668 37.1328 78.0937 42.0137 78.0937 46.9902C78.0937 58.7617 69.1934 67.6621 56.3691 69.2891C59.623 71.3945 61.8242 75.9883 61.8242 81.252L61.8242 91.2051C61.8242 94.0762 64.2168 95.7031 67.0879 94.5547C84.4102 87.9512 98 70.6289 98 49.1914C98 22.1074 75.9883 6.69539e-07 48.9043 4.309e-07C21.8203 1.92261e-07 -1.9479e-07 22.1074 -4.3343e-07 49.1914C-6.20631e-07 70.4375 13.4941 88.0469 31.6777 94.6504C34.2617 95.6074 36.75 93.8848 36.75 91.3008L36.75 83.6445C35.4102 84.2188 33.6875 84.6016 32.1562 84.6016C25.8398 84.6016 22.1074 81.1563 19.4277 74.7441C18.375 72.1602 17.2266 70.6289 15.0254 70.3418C13.877 70.2461 13.4941 69.7676 13.4941 69.1934C13.4941 68.0449 15.4082 67.1836 17.3223 67.1836C20.0977 67.1836 22.4902 68.9063 24.9785 72.4473C26.8926 75.2227 28.9023 76.4668 31.2949 76.4668C33.6875 76.4668 35.2187 75.6055 37.4199 73.4043C39.0469 71.7773 40.291 70.3418 41.4395 69.3848Z",
+                        }
+                    }
+                }
+            }
+            div { class: "settings-tabs",
+                button {
+                    class: if *settings_tab.read() == 0 { "settings-tab active" } else { "settings-tab" },
+                    onclick: move |_| settings_tab.set(0),
+                    "一般"
+                }
+                button {
+                    class: if *settings_tab.read() == 1 { "settings-tab active" } else { "settings-tab" },
+                    onclick: move |_| settings_tab.set(1),
+                    "考試"
+                }
+                button {
+                    class: if *settings_tab.read() == 2 { "settings-tab active" } else { "settings-tab" },
+                    onclick: move |_| settings_tab.set(2),
+                    "FSRS"
+                }
+            }
+            if *settings_tab.read() == 0 {
+                div { class: "settings-body",
+                    div { class: "settings-section-label", "主題" }
+                    div { class: "theme-segmented",
+                        button {
+                            class: if *app.theme_mode.read() == ThemeMode::Light { "theme-btn active" } else { "theme-btn" },
+                            onclick: move |_| app.theme_mode.set(ThemeMode::Light),
+                            span { class: "material-symbols-outlined", "light_mode" }
+                            span { "淺色" }
+                        }
+                        button {
+                            class: if *app.theme_mode.read() == ThemeMode::System { "theme-btn active" } else { "theme-btn" },
+                            onclick: move |_| app.theme_mode.set(ThemeMode::System),
+                            span { class: "material-symbols-outlined", "settings_brightness" }
+                            span { "系統" }
+                        }
+                        button {
+                            class: if *app.theme_mode.read() == ThemeMode::Dark { "theme-btn active" } else { "theme-btn" },
+                            onclick: move |_| app.theme_mode.set(ThemeMode::Dark),
+                            span { class: "material-symbols-outlined", "dark_mode" }
+                            span { "深色" }
+                        }
+                    }
+                    div {
+                        class: "settings-item",
+                        onclick: move |_| {
+                            let new_val = !*app.update_check_enabled.read();
+                            app.update_check_enabled.set(new_val);
+                        },
+                        div { class: "settings-item-icon",
+                            span { class: "material-symbols-outlined", "system_update" }
+                        }
+                        div { class: "settings-item-label", "更新檢測" }
+                        div {
+                            class: if *app.update_check_enabled.read() { "settings-switch on" } else { "settings-switch" },
+                        }
+                    }
+                    div {
+                        class: "settings-item",
+                        onclick: move |_| {
+                            spawn(async move {
+                                let js = format!(
+                                    r#"fetch('https://api.github.com/repos/{repo}/releases/latest',{{headers:{{'Accept':'application/json','User-Agent':'scallion-vocab'}}}}).then(r=>r.json()).then(d=>{{var tag=d.tag_name||'';var info=JSON.stringify({{tag:tag,url:(d.assets&&d.assets[0])?d.assets[0].browser_download_url:'',size:(d.assets&&d.assets[0])?d.assets[0].size:0}});dioxus.send(info)}}).catch(function(){{dioxus.send('')}});"#,
+                                    repo = GH_REPO
+                                );
+                                let mut eval = document::eval(&js);
+                                match eval.recv::<String>().await {
+                                    Ok(json) if !json.is_empty() => {
+                                        if let Ok(info) = serde_json::from_str::<UpdateInfo>(&json) {
+                                            if !info.tag.is_empty()
+                                                && !info.url.is_empty()
+                                                && parse_version(&info.tag).map_or(false, |v| {
+                                                    parse_version(APP_VERSION).map_or(true, |cur| v > cur)
+                                                })
+                                            {
+                                                app.update_info.set(Some(info));
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                push_toast(app, "已是最新版本");
+                            });
+                        },
+                        div { class: "settings-item-icon",
+                            span { class: "material-symbols-outlined", "update" }
+                        }
+                        div { class: "settings-item-label", "檢查更新" }
+                    }
+                }
+            } else if *settings_tab.read() == 1 {
+                div { class: "settings-body",
+                    div {
+                        class: "settings-item",
+                        onclick: move |_| {
+                            let new_val = !*app.infinite_mode.read();
+                            app.infinite_mode.set(new_val);
+                        },
+                        div { class: "settings-item-icon",
+                            span { class: "material-symbols-outlined", "all_inclusive" }
+                        }
+                        div { class: "settings-item-label", "無限考試" }
+                        div {
+                            class: if *app.infinite_mode.read() { "settings-switch on" } else { "settings-switch" },
+                        }
+                    }
+                    div {
+                        class: "settings-item",
+                        onclick: move |_| {
+                            let mut c = app.fsrs_config.cloned();
+                            c.review_wrong = !c.review_wrong;
+                            app.fsrs_config.set(c);
+                        },
+                        div { class: "settings-item-icon",
+                            span { class: "material-symbols-outlined", "refresh" }
+                        }
+                        div { class: "settings-item-label",
+                            div { "重複出現錯題" }
+                            div { class: "settings-item-sub", "關閉時錯題不加入複習佇列，優先於 FSRS 設定" }
+                        }
+                        div {
+                            class: if app.fsrs_config.read().review_wrong { "settings-switch on" } else { "settings-switch" },
+                        }
+                    }
+                    div {
+                        class: "settings-item",
+                        onclick: move |_| {
+                            let new_val = !*app.show_finished_screen.read();
+                            app.show_finished_screen.set(new_val);
+                        },
+                        div { class: "settings-item-icon",
+                            span { class: "material-symbols-outlined", "celebration" }
+                        }
+                        div { class: "settings-item-label",
+                            div { "是否啟用結算分數" }
+                            div { class: "settings-item-sub", "此設定僅在關閉無限考試時生效" }
+                        }
+                        div {
+                            class: if *app.show_finished_screen.read() { "settings-switch on" } else { "settings-switch" },
+                        }
+                    }
+                    div {
+                        class: "settings-item",
+                        style: "cursor: default;",
+                        div { class: "settings-item-icon",
+                            span { class: "material-symbols-outlined", "timer" }
+                        }
+                        div { class: "settings-item-label",
+                            div { "自動跳題時間" }
+                            div { class: "settings-item-sub", "設為負數則關閉" }
+                        }
+                        input {
+                            class: "fsrs-input",
+                            style: "width: 100px; flex-shrink: 0; text-align: right;",
+                            r#type: "number",
+                            value: "{app.auto_advance_ms.read()}",
+                            oninput: move |e| {
+                                let v = e.value().trim().to_string();
+                                if v.is_empty() { return; }
+                                if let Ok(n) = v.parse::<i64>() {
+                                    app.auto_advance_ms.set(n);
+                                }
+                            },
+                        }
+                    }
+                }
+            } else {
+                div { class: "settings-body",
+                    FsrsSettings {}
+                }
+            }
+            div { class: "settings-version", "v1.2" }
+        }
+        if *show_licenses.read() {
+            div { class: "license-overlay",
+                div { class: "license-dialog",
+                    div { class: "license-dialog-topbar",
+                        button {
+                            class: "license-dialog-close",
+                            onclick: move |_| show_licenses.set(false),
+                            span { class: "material-symbols-outlined", "close" }
+                        }
+                        span { class: "license-dialog-title", "開源許可證" }
+                    }
+                    div { class: "license-list",
+                        {licenses::ALL_DEPS.iter().map(|dep| {
+                            let n = dep.name.to_owned();
+                            let lf = dep.license_file.to_owned();
+                            rsx! {
+                                button {
+                                    key: "{dep.name}",
+                                    class: "license-item",
+                                    onclick: move |_| {
+                                        selected_dep_name.set(n.clone());
+                                        selected_dep_license.set(lf.clone());
+                                    },
+                                    span { class: "license-item-name", "{dep.name}" }
+                                    span { class: "license-item-type", "{dep.license_display}" }
+                                }
+                            }
+                        })}
+                    }
+                }
+            }
+        }
+        {show_detail.then(|| {
+            let n = detail_name.clone();
+            let t = detail_text.clone();
+            rsx! {
+                div { class: "license-detail-overlay",
+                    div { class: "license-detail-dialog",
+                        div { class: "license-detail-topbar",
+                            button {
+                                class: "license-detail-close",
+                                onclick: move |_| {
+                                    selected_dep_name.set(String::new());
+                                    selected_dep_license.set(String::new());
+                                },
+                                span { class: "material-symbols-outlined", "arrow_back" }
+                            }
+                            span { class: "license-detail-title", "{n}" }
+                        }
+                        div { class: "license-detail-body", "{t}" }
+                    }
+                }
+            }
+        })}
     }
 }
 
