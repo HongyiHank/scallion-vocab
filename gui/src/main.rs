@@ -2,14 +2,16 @@ mod logging;
 mod css;
 mod model;
 mod licenses;
+mod db;
 
 use dioxus::document;
 use dioxus::prelude::*;
-use model::{sleep_ms, FsrsConfig, FsrsRating, QuizState, Screen, Word};
+use db::Database;
+use model::{sleep_ms, Deck, FsrsConfig, FsrsRating, QuizState, Screen, Word};
 use quizlet_scraper::{build_flashcards_url, extract_deck_id, extract_title, scrape_quizlet_html};
 use percent_encoding::percent_decode;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -64,6 +66,7 @@ struct AppSignals {
     download_progress: Signal<Option<f64>>,
     show_reset_confirm: Signal<bool>,
     update_check_enabled: Signal<bool>,
+    db: Signal<Option<Database>>,
 }
 
 fn push_toast(mut app: AppSignals, msg: impl Into<String>) {
@@ -109,6 +112,7 @@ fn App() -> Element {
         download_progress: Signal::new(None),
         show_reset_confirm: Signal::new(false),
         update_check_enabled: Signal::new(true),
+        db: Signal::new(None),
     });
 
     let mut app = use_context::<AppSignals>();
@@ -179,6 +183,23 @@ fn App() -> Element {
         });
     });
 
+    use_effect(move || {
+        spawn(async move {
+            if app.db.read().is_some() {
+                return;
+            }
+            match Database::open() {
+                Ok(database) => {
+                    log!("[DB::Init] database opened successfully");
+                    app.db.set(Some(database));
+                }
+                Err(e) => {
+                    log!("[DB::Init] failed to open database: {e}");
+                }
+            }
+        });
+    });
+
     // Check for updates on launch (after prefs loaded, if enabled).
     use_effect(move || {
         if !*app.prefs_loaded.read() || !*app.update_check_enabled.read() {
@@ -225,8 +246,8 @@ fn App() -> Element {
                 // Settings screen → back to Upload
                 el = document.querySelector('.settings-close');
                 if (el) { el.click(); return; }
-                // Library screen → back to Upload
-                el = document.querySelector('.library-close');
+                // Library screen: 委派給 .library-back 處理（回上層或根目錄時觸發「再按一次以退出」）
+                el = document.querySelector('.library-back');
                 if (el) { el.click(); return; }
                 // HTML fallback → cancel (text-btn inside fallback-actions)
                 el = document.querySelector('.html-fallback');
@@ -676,7 +697,7 @@ fn parse_anki_text(text: &str) -> Vec<Word> {
             if front.is_empty() || back.is_empty() {
                 None
             } else {
-                Some(Word { front, back })
+                Some(Word { front, back, pos: String::new(), pron: String::new(), example: String::new(), synonym: String::new(), antonym: String::new(), tags: Vec::new() })
             }
         })
         .collect()
@@ -1174,7 +1195,7 @@ async fn fetch_quizlet_multi(urls: &[String]) -> (Vec<Word>, Vec<String>) {
                 continue;
             }
             if seen.insert((front.clone(), back.clone())) {
-                all_words.push(Word { front, back });
+                all_words.push(Word { front, back, pos: String::new(), pron: String::new(), example: String::new(), synonym: String::new(), antonym: String::new(), tags: Vec::new() });
                 added += 1;
             }
         }
@@ -1199,7 +1220,7 @@ fn scrape_words_from_html(html: &str) -> FetchResult<(Vec<Word>, String)> {
                 return None;
             }
             if seen.insert((front.clone(), back.clone())) {
-                Some(Word { front, back })
+                Some(Word { front, back, pos: String::new(), pron: String::new(), example: String::new(), synonym: String::new(), antonym: String::new(), tags: Vec::new() })
             } else {
                 None
             }
@@ -1367,8 +1388,7 @@ fn QuizScreen() -> Element {
 fn QuestionDisplay() -> Element {
     let app = use_context::<AppSignals>();
 
-    // 只複製目標單字的 front/back（2 個 String），不複製整個 QuizState
-    let (front, back, answered, ask_front) = {
+    let info = {
         let qs = app.quiz.read();
         let Some(qs) = qs.as_ref() else {
             return rsx! { div {} };
@@ -1377,14 +1397,44 @@ fn QuestionDisplay() -> Element {
             return rsx! { div {} };
         };
         let word = &qs.words[q.target_idx];
-        (word.front.clone(), word.back.clone(), q.answered, q.ask_front)
+        (word.front.clone(), word.back.clone(), word.pos.clone(), word.pron.clone(), word.example.clone(), word.synonym.clone(), word.antonym.clone(), q.answered, q.ask_front)
     };
+    let (front, back, pos, pron, example, synonym, antonym, answered, ask_front) = info;
 
     if answered {
         rsx! {
             h2 { id: "question-word",
                 span { class: "ans-en", "{front}" }
                 span { class: "ans-zh", "{back}" }
+            }
+            div { class: "word-detail",
+                {(!pos.is_empty()).then(|| rsx! {
+                    span { class: "word-detail-tag", "{pos}" }
+                })}
+                {(!pron.is_empty()).then(|| rsx! {
+                    span { class: "word-detail-item",
+                        span { class: "word-detail-label", "發音" }
+                        span { "{pron}" }
+                    }
+                })}
+                {(!example.is_empty()).then(|| rsx! {
+                    div { class: "word-detail-item word-detail-example",
+                        span { class: "word-detail-label", "例句" }
+                        span { "{example}" }
+                    }
+                })}
+                {(!synonym.is_empty()).then(|| rsx! {
+                    div { class: "word-detail-item",
+                        span { class: "word-detail-label", "同義詞" }
+                        span { "{synonym}" }
+                    }
+                })}
+                {(!antonym.is_empty()).then(|| rsx! {
+                    div { class: "word-detail-item",
+                        span { class: "word-detail-label", "反義詞" }
+                        span { "{antonym}" }
+                    }
+                })}
             }
         }
     } else {
@@ -1869,21 +1919,819 @@ fn NavBar() -> Element {
     }
 }
 
+enum GroupedItem {
+    Header { name: String, count: usize },
+    Deck(Deck),
+}
+
+const DECK_COLORS: &[&str] = &[
+    "#c62828", "#e53935", "#d81b60", "#8e24aa",
+    "#5e35b1", "#3949ab", "#1e88e5", "#00acc1",
+    "#00897b", "#43a047", "#7cb342", "#c0ca33",
+    "#fdd835", "#ffb300", "#fb8c00", "#6d4c41",
+];
+
 #[component]
 fn LibraryScreen() -> Element {
-    let mut app = use_context::<AppSignals>();
-    rsx! {
-        button {
-            class: "library-close",
-            style: "position: absolute; opacity: 0; width: 1px; height: 1px; overflow: hidden;",
-            onclick: move |_| app.screen.set(Screen::Upload),
-        }
-        div { class: "library-screen",
-            div { class: "library-icon",
-                span { class: "material-symbols-outlined", "menu_book" }
+    let app = use_context::<AppSignals>();
+
+    let mut current_folder_id = use_signal(|| None::<i64>);
+    let mut breadcrumb = use_signal(Vec::<Deck>::new);
+    let mut items = use_signal(Vec::<Deck>::new);
+
+    let mut show_fab_menu = use_signal(|| false);
+    let mut show_create_deck = use_signal(|| false);
+    let mut show_create_folder = use_signal(|| false);
+    let mut sort_by = use_signal(|| "date".to_string());
+    let mut sort_asc = use_signal(|| true);
+    let mut folder_first = use_signal(|| true);
+    let mut show_sort_menu = use_signal(|| false);
+    let mut search_mode = use_signal(|| false);
+    let mut search_text = use_signal(String::new);
+    let mut show_rename = use_signal(|| false);
+    let mut show_delete = use_signal(|| false);
+    let mut rename_target = use_signal(|| 0i64);
+    let mut delete_target = use_signal(|| 0i64);
+    let mut is_folder_target = use_signal(|| false);
+    let mut create_name = use_signal(String::new);
+    let mut rename_name = use_signal(String::new);
+    let mut refresh = use_signal(|| 0u64);
+    let mut selected_color = use_signal(|| DECK_COLORS[0].to_string());
+    let mut show_create_word = use_signal(|| false);
+    let mut create_word_front = use_signal(String::new);
+    let mut create_word_back = use_signal(String::new);
+    let mut create_word_pos = use_signal(String::new);
+    let mut create_word_pron = use_signal(String::new);
+    let mut create_word_example = use_signal(String::new);
+    let mut create_word_synonym = use_signal(String::new);
+    let mut create_word_antonym = use_signal(String::new);
+    let mut create_word_tags = use_signal(String::new);
+    let mut all_decks = use_signal(Vec::<Deck>::new);
+    let mut selected_deck_idx = use_signal(|| None::<usize>);
+    let pos_options = ["", "名詞", "動詞", "形容詞", "副詞", "介系詞", "連接詞", "代名詞", "感嘆詞", "片語", "其他"];
+
+    use_effect(move || {
+        let _ = *refresh.read();
+        let _ = sort_by.cloned();
+        let _ = *sort_asc.read();
+        let _ = *folder_first.read();
+        let fid = *current_folder_id.read();
+        let db = app.db.cloned();
+        spawn(async move {
+            if let Some(db) = db {
+                match db.list_by_parent(fid) {
+                    Ok(list) => {
+                        let sb = sort_by.cloned();
+                        let sa = *sort_asc.read();
+                        let ffirst = *folder_first.read();
+                        let sort_key = |a: &Deck, b: &Deck| match sb.as_str() {
+                            "name" => a.name.cmp(&b.name),
+                            "count" => a.word_count.cmp(&b.word_count),
+                            _ => a.updated_at.cmp(&b.updated_at).then_with(|| a.id.cmp(&b.id)),
+                        };
+                        let apply_dir = |cmp: std::cmp::Ordering| {
+                            if sa { cmp } else { cmp.reverse() }
+                        };
+                        let mut folders: Vec<Deck> =
+                            list.iter().filter(|d| d.is_folder).cloned().collect();
+                        let mut decks: Vec<Deck> =
+                            list.iter().filter(|d| !d.is_folder).cloned().collect();
+                        folders.sort_by(|a, b| apply_dir(sort_key(a, b)));
+                        decks.sort_by(|a, b| apply_dir(sort_key(a, b)));
+                        let sorted: Vec<Deck> = if ffirst {
+                            folders.into_iter().chain(decks).collect()
+                        } else {
+                            decks.into_iter().chain(folders).collect()
+                        };
+                        items.set(sorted);
+                    }
+                    Err(e) => log!("[Library] list_by_parent failed: {e}"),
+                }
+                match db.get_folder_path(fid) {
+                    Ok(path) => breadcrumb.set(path),
+                    Err(e) => log!("[Library] get_folder_path failed: {e}"),
+                }
+                match db.list_direct_decks(fid) {
+                    Ok(decks) => all_decks.set(decks),
+                    Err(e) => log!("[Library] list_direct_decks failed: {e}"),
+                }
             }
-            div { class: "library-title", "字庫" }
-            div { class: "library-subtitle", "待開發" }
+        });
+    });
+
+    let item_vec = items.cloned();
+    let breadcrumb_vec = breadcrumb.cloned();
+
+    let search_q = search_text.read().clone();
+    let display_items: Vec<GroupedItem> = if search_q.trim().is_empty() {
+        item_vec.into_iter().map(GroupedItem::Deck).collect()
+    } else {
+        let db = app.db.read().clone();
+        let Some(db) = db.as_ref() else {
+            return rsx! { div { class: "library-screen" } };
+        };
+        let results = db.search_decks(&search_q).ok().unwrap_or_default();
+        if results.is_empty() {
+            item_vec.into_iter().map(GroupedItem::Deck).collect()
+        } else {
+            let mut groups: HashMap<Option<i64>, Vec<Deck>> = HashMap::new();
+            for deck in results {
+                groups.entry(deck.parent_id).or_default().push(deck);
+            }
+            // Load ALL folders in one query for in-memory path resolution.
+            let folder_map: HashMap<i64, (String, Option<i64>)> = db
+                .get_folder_map(&[])
+                .ok()
+                .unwrap_or_default();
+            let sb = sort_by.cloned();
+            let sa = *sort_asc.read();
+            let sort_key = |a: &Deck, b: &Deck| match sb.as_str() {
+                "name" => a.name.cmp(&b.name),
+                "count" => a.word_count.cmp(&b.word_count),
+                _ => a.updated_at.cmp(&b.updated_at).then_with(|| a.id.cmp(&b.id)),
+            };
+            let apply_dir = |cmp: std::cmp::Ordering| {
+                if sa { cmp } else { cmp.reverse() }
+            };
+            let mut group_entries: Vec<(Option<i64>, Vec<Deck>)> = groups.drain().collect();
+            for (_, decks) in &mut group_entries {
+                decks.sort_by(|a, b| apply_dir(sort_key(a, b)));
+            }
+            group_entries.sort_by(|(parent_a, decks_a), (parent_b, decks_b)| {
+                match (parent_a, parent_b) {
+                    (None, None) => std::cmp::Ordering::Equal,
+                    (None, Some(_)) => std::cmp::Ordering::Less,
+                    (Some(_), None) => std::cmp::Ordering::Greater,
+                    (Some(_), Some(_)) => match (decks_a.first(), decks_b.first()) {
+                        (Some(da), Some(db)) => apply_dir(sort_key(da, db)),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    },
+                }
+            });
+            let mut grouped: Vec<GroupedItem> = Vec::new();
+            for (parent_id, decks) in group_entries {
+                let name = match parent_id {
+                    None => "根目錄".to_string(),
+                    Some(pid) => {
+                        // Resolve folder path from in-memory map (no per-group SQL).
+                        let mut path = Vec::new();
+                        let mut cur = Some(pid);
+                        while let Some(fid) = cur {
+                            if let Some((n, p)) = folder_map.get(&fid) {
+                                path.push(n.clone());
+                                cur = *p;
+                            } else {
+                                path.push("未知資料夾".to_string());
+                                break;
+                            }
+                        }
+                        path.reverse();
+                        path.join(" / ")
+                    }
+                };
+                grouped.push(GroupedItem::Header { name, count: decks.len() });
+                for deck in decks {
+                    grouped.push(GroupedItem::Deck(deck));
+                }
+            }
+            grouped
+        }
+    };
+
+    rsx! {
+        div { class: "library-screen",
+            button {
+                class: "library-back",
+                style: "position: absolute; opacity: 0; width: 1px; height: 1px; overflow: hidden;",
+                onclick: move |_| {
+                    let bc = breadcrumb.read().clone();
+                    if !bc.is_empty() {
+                        let parent_id = if bc.len() >= 2 {
+                            Some(bc[bc.len() - 2].id)
+                        } else {
+                            None
+                        };
+                        current_folder_id.set(parent_id);
+                    } else {
+                        // 根目錄 → 走 JS 雙擊退出流程（與 Upload 畫面行為一致）
+                        spawn(async move {
+                            let js = r#"
+                                if (!window.__backExitFlag) {
+                                    window.__backExitFlag = true;
+                                    try { AndroidBackHandler.showToast('再按一次以退出'); } catch(e) {}
+                                    setTimeout(function() { window.__backExitFlag = false; }, 3000);
+                                } else {
+                                    try { AndroidBackHandler.finishActivity(); } catch(e) {}
+                                }
+                            "#;
+                            let _ = document::eval(js).await;
+                        });
+                    }
+                },
+            }
+            div { class: "library-topbar",
+                div {
+                    class: format!("breadcrumb{}", if *search_mode.read() { " search-mode" } else { "" }),
+                    button {
+                        class: "breadcrumb-btn breadcrumb-home",
+                        onclick: move |_| current_folder_id.set(None),
+                        span { class: "material-symbols-outlined", "folder" }
+                    }
+                    {breadcrumb_vec.into_iter().map(|f| {
+                        let fid = f.id;
+                        let fname = f.name.clone();
+                        rsx! {
+                            span { class: "breadcrumb-sep", ">" }
+                            button {
+                                class: "breadcrumb-btn",
+                                onclick: move |_| current_folder_id.set(Some(fid)),
+                                "{fname}"
+                            }
+                        }
+                    })}
+                }
+                div {
+                    class: format!("search-bar{}", if *search_mode.read() { " search-mode" } else { "" }),
+                    span {
+                        class: "material-symbols-outlined search-icon-inline",
+                        "search"
+                    }
+                    input {
+                        class: "search-input",
+                        r#type: "text",
+                        autocomplete: "off",
+                        autocapitalize: "off",
+                        autocorrect: "off",
+                        spellcheck: "false",
+                        enterkeyhint: "search",
+                        lang: "zh-Hant-TW",
+                        placeholder: "搜尋牌組、資料夾...",
+                        oninput: move |e| { search_text.set(e.value()); },
+                    }
+                    button {
+                        class: "search-close",
+                        onclick: move |_| {
+                            search_mode.set(false);
+                            search_text.set(String::new());
+                        },
+                        span { class: "material-symbols-outlined", "close" }
+                    }
+                }
+                if !*search_mode.read() {
+                    button {
+                        class: "search-btn",
+                        onclick: move |_| search_mode.set(true),
+                        span { class: "material-symbols-outlined", "search" }
+                    }
+                }
+                if *show_sort_menu.read() {
+                    div {
+                        class: "sort-overlay",
+                        onclick: move |_| show_sort_menu.set(false),
+                    }
+                }
+                div { class: "sort-btn-wrap",
+                    button {
+                        class: "sort-btn",
+                        onclick: move |_| {
+                            let next = !*show_sort_menu.read();
+                            show_sort_menu.set(next);
+                        },
+                        span { class: "material-symbols-outlined", "sort" }
+                    }
+                    if *show_sort_menu.read() {
+                        div { class: "sort-menu open",
+                            onclick: move |e| e.stop_propagation(),
+                            div { class: "sort-menu-title", "排序方式" }
+                            div { class: "sort-menu-section",
+                                div { class: "sort-menu-label", "優先顯示" }
+                                button {
+                                    class: format!("sort-menu-item{}", if *folder_first.read() { " selected" } else { "" }),
+                                    onclick: move |_| folder_first.set(true),
+                                    span { class: "sort-menu-check material-symbols-outlined", "check" }
+                                    "資料夾優先"
+                                }
+                                button {
+                                    class: format!("sort-menu-item{}", if !*folder_first.read() { " selected" } else { "" }),
+                                    onclick: move |_| folder_first.set(false),
+                                    span { class: "sort-menu-check material-symbols-outlined", "check" }
+                                    "牌組優先"
+                                }
+                            }
+                            div { class: "sort-menu-section",
+                                div { class: "sort-menu-label", "排序依據" }
+                                button {
+                                    class: format!("sort-menu-item{}", if *sort_by.read() == "name" { " selected" } else { "" }),
+                                    onclick: move |_| sort_by.set("name".to_string()),
+                                    span { class: "sort-menu-check material-symbols-outlined", "check" }
+                                    "名稱"
+                                }
+                                button {
+                                    class: format!("sort-menu-item{}", if *sort_by.read() == "date" { " selected" } else { "" }),
+                                    onclick: move |_| sort_by.set("date".to_string()),
+                                    span { class: "sort-menu-check material-symbols-outlined", "check" }
+                                    "日期"
+                                }
+                                button {
+                                    class: format!("sort-menu-item{}", if *sort_by.read() == "count" { " selected" } else { "" }),
+                                    onclick: move |_| sort_by.set("count".to_string()),
+                                    span { class: "sort-menu-check material-symbols-outlined", "check" }
+                                    "詞數"
+                                }
+                            }
+                            div { class: "sort-menu-section",
+                                div { class: "sort-menu-label", "排序方向" }
+                                button {
+                                    class: format!("sort-menu-item{}", if *sort_asc.read() { " selected" } else { "" }),
+                                    onclick: move |_| sort_asc.set(true),
+                                    span { class: "sort-menu-check material-symbols-outlined", "check" }
+                                    "↑ 升序"
+                                }
+                                button {
+                                    class: format!("sort-menu-item{}", if !*sort_asc.read() { " selected" } else { "" }),
+                                    onclick: move |_| sort_asc.set(false),
+                                    span { class: "sort-menu-check material-symbols-outlined", "check" }
+                                    "↓ 降序"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "deck-list",
+                {display_items.into_iter().map(|gi| {
+                    match gi {
+                        GroupedItem::Header { name, count } => {
+                            rsx! {
+                                div { class: "search-group-header",
+                                    span { class: "material-symbols-outlined search-group-icon", "folder" }
+                                    span { class: "search-group-title", "{name}" }
+                                    span { class: "search-group-count", "({count})" }
+                                }
+                            }
+                        }
+                        GroupedItem::Deck(item) => {
+                            if item.is_folder {
+                                let fid = item.id;
+                                let fname = item.name.clone();
+                                let fdate = item.updated_at.clone();
+                                rsx! {
+                                    div {
+                                        key: "folder-{item.id}",
+                                        class: "folder-item",
+                                        onclick: move |_| current_folder_id.set(Some(fid)),
+                                        span { class: "material-symbols-outlined folder-icon", "folder" }
+                                        div { class: "deck-content",
+                                            div { class: "deck-headline", "{fname}" }
+                                        }
+                                        div { class: "deck-actions",
+                                            div { class: "deck-btns",
+                                                button {
+                                                    class: "deck-btn",
+                                                    onclick: move |e| {
+                                                        e.stop_propagation();
+                                                        rename_target.set(fid);
+                                                        rename_name.set(fname.clone());
+                                                        is_folder_target.set(true);
+                                                        show_rename.set(true);
+                                                    },
+                                                    span { class: "material-symbols-outlined", "edit" }
+                                                }
+                                                button {
+                                                    class: "deck-btn danger",
+                                                    onclick: move |e| {
+                                                        e.stop_propagation();
+                                                        delete_target.set(fid);
+                                                        is_folder_target.set(true);
+                                                        show_delete.set(true);
+                                                    },
+                                                    span { class: "material-symbols-outlined", "delete" }
+                                                }
+                                            }
+                                            div { class: "deck-date", "{fdate}" }
+                                        }
+                                    }
+                                }
+                            } else {
+                                let deck_id = item.id;
+                                let deck_name = item.name.clone();
+                                let color = item.color.clone();
+                                let wc = item.word_count;
+                                let ddate = item.updated_at.clone();
+                                rsx! {
+                                    div { key: "deck-{item.id}", class: "deck-item",
+                                        span { class: "deck-color-dot", style: "background: {color}" }
+                                        div { class: "deck-content",
+                                            div { class: "deck-headline", "{deck_name}" }
+                                            div { class: "deck-supporting", "{wc} 詞" }
+                                        }
+                                        div { class: "deck-actions",
+                                            div { class: "deck-btns",
+                                                button {
+                                                    class: "deck-btn",
+                                                    onclick: move |_| {
+                                                        rename_target.set(deck_id);
+                                                        rename_name.set(deck_name.clone());
+                                                        is_folder_target.set(false);
+                                                        show_rename.set(true);
+                                                    },
+                                                    span { class: "material-symbols-outlined", "edit" }
+                                                }
+                                                button {
+                                                    class: "deck-btn danger",
+                                                    onclick: move |_| {
+                                                        delete_target.set(deck_id);
+                                                        is_folder_target.set(false);
+                                                        show_delete.set(true);
+                                                    },
+                                                    span { class: "material-symbols-outlined", "delete" }
+                                                }
+                                            }
+                                            div { class: "deck-date", "{ddate}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                })}
+            }
+        }
+        if *show_fab_menu.read() {
+            div {
+                class: "fab-overlay",
+                onclick: move |_| show_fab_menu.set(false),
+                div { class: "fab-speed-dial",
+                    button {
+                        class: "fab-option",
+                        onclick: move |_| {
+                            show_fab_menu.set(false);
+                            create_name.set(String::new());
+                            selected_color.set(DECK_COLORS[0].to_string());
+                            show_create_deck.set(true);
+                        },
+                        span { class: "material-symbols-outlined", "note_add" }
+                        span { "牌組" }
+                    }
+                    button {
+                        class: "fab-option",
+                        onclick: move |_| {
+                            show_fab_menu.set(false);
+                            create_name.set(String::new());
+                            show_create_folder.set(true);
+                        },
+                        span { class: "material-symbols-outlined", "create_new_folder" }
+                        span { "資料夾" }
+                    }
+                    button {
+                        class: "fab-option",
+                        onclick: move |_| {
+                            show_fab_menu.set(false);
+                            create_word_front.set(String::new());
+                            create_word_back.set(String::new());
+                            create_word_pos.set(String::new());
+                            create_word_pron.set(String::new());
+                            create_word_example.set(String::new());
+                            create_word_synonym.set(String::new());
+                            create_word_antonym.set(String::new());
+                            create_word_tags.set(String::new());
+                            selected_deck_idx.set(None);
+                            show_create_word.set(true);
+                        },
+                        span { class: "material-symbols-outlined", "playlist_add" }
+                        span { "字彙" }
+                    }
+                }
+            }
+        }
+        button {
+            class: format!("add-fab{}", if *show_fab_menu.read() { " active" } else { "" }),
+            onclick: move |_| {
+                let next = !*show_fab_menu.read();
+                show_fab_menu.set(next);
+            },
+            span { class: "material-symbols-outlined", if *show_fab_menu.read() { "close" } else { "add" } }
+            }
+            ModalDialog {
+            visible: *show_create_deck.read(),
+            title: "新增牌組",
+            div { class: "update-body",
+            input {
+                class: "fsrs-input",
+                placeholder: "牌組名稱",
+                value: "{create_name}",
+                oninput: move |e| create_name.set(e.value()),
+            }
+            div { class: "color-picker",
+                div { class: "color-picker-label", "標記顏色" }
+                div { class: "color-picker-grid",
+                    {DECK_COLORS.into_iter().map(|c| {
+                        let color = *c;
+                        let selected = *selected_color.read() == color;
+                        rsx! {
+                            button {
+                                class: format!("color-swatch{}", if selected { " selected" } else { "" }),
+                                style: "background: {color}",
+                                onclick: move |_| selected_color.set(color.to_string()),
+                                if selected {
+                                    span { class: "material-symbols-outlined", "check" }
+                                }
+                            }
+                        }
+                    })}
+                }
+            }
+            }
+
+            div { class: "update-actions",
+            button {
+                class: "update-btn secondary",
+                onclick: move |_| show_create_deck.set(false),
+                "取消"
+            }
+            button {
+                class: "update-btn primary",
+                onclick: move |_| {
+                    let name = create_name.read().trim().to_string();
+                    if name.is_empty() { return; }
+                    let color = selected_color.read().clone();
+                    let pid = *current_folder_id.read();
+                    let db = app.db.cloned();
+                    spawn(async move {
+                        if let Some(db) = db {
+                            match db.create_deck(&name, pid) {
+                                Ok(d) => {
+                                    let _ = db.update_deck_color(d.id, &color);
+                                }
+                                Err(e) => log!("[Library] create_deck failed: {e}"),
+                            }
+                            refresh.set(refresh() + 1);
+                        }
+                    });
+                    show_create_deck.set(false);
+                },
+                "確定"
+            }
+            }
+            }
+            ModalDialog {
+            visible: *show_create_folder.read(),
+            title: "新增資料夾",
+            div { class: "update-body",
+            input {
+                class: "fsrs-input",
+                placeholder: "資料夾名稱",
+                value: "{create_name}",
+                oninput: move |e| create_name.set(e.value()),
+            }
+            }
+            div { class: "update-actions",
+            button {
+                class: "update-btn secondary",
+                onclick: move |_| show_create_folder.set(false),
+                "取消"
+            }
+            button {
+                class: "update-btn primary",
+                onclick: move |_| {
+                    let name = create_name.read().trim().to_string();
+                    if name.is_empty() { return; }
+                    let pid = *current_folder_id.read();
+                    let db = app.db.cloned();
+                    spawn(async move {
+                        if let Some(db) = db {
+                            if let Err(e) = db.create_folder(&name, pid) {
+                                log!("[Library] create_folder failed: {e}");
+                            }
+                            refresh.set(refresh() + 1);
+                        }
+                    });
+                    show_create_folder.set(false);
+                },
+                "確定"
+            }
+            }
+            }
+            ModalDialog {
+            visible: *show_rename.read(),
+            title: "重新命名",
+            div { class: "update-body",
+                input {
+                    class: "fsrs-input",
+                    placeholder: "名稱",
+                    value: "{rename_name}",
+                    oninput: move |e| rename_name.set(e.value()),
+                }
+            }
+            div { class: "update-actions",
+                button {
+                    class: "update-btn secondary",
+                    onclick: move |_| show_rename.set(false),
+                    "取消"
+                }
+                button {
+                    class: "update-btn primary",
+                    onclick: move |_| {
+                        let name = rename_name.read().trim().to_string();
+                        let id = *rename_target.read();
+                        if name.is_empty() { return; }
+                        let db = app.db.cloned();
+                        spawn(async move {
+                            if let Some(db) = db {
+                                if let Err(e) = db.rename_deck(id, &name) {
+                                    log!("[Library] rename_deck failed: {e}");
+                                }
+                                refresh.set(refresh() + 1);
+                            }
+                        });
+                        show_rename.set(false);
+                    },
+                    "確定"
+                }
+            }
+        }
+        ModalDialog {
+            visible: *show_delete.read(),
+            title: "刪除",
+            div { class: "update-body",
+                if *is_folder_target.read() {
+                    "確定要刪除此資料夾？內含的所有牌組與子資料夾也將一併刪除。"
+                } else {
+                    "確定要刪除此牌組？牌組內的所有單字也將一併刪除。"
+                }
+            }
+            div { class: "update-actions",
+                button {
+                    class: "update-btn secondary",
+                    onclick: move |_| show_delete.set(false),
+                    "取消"
+                }
+                button {
+                    class: "update-btn primary",
+                    onclick: move |_| {
+                        let id = *delete_target.read();
+                        let db = app.db.cloned();
+                        spawn(async move {
+                            if let Some(db) = db {
+                                if let Err(e) = db.delete_deck(id) {
+                                    log!("[Library] delete_deck failed: {e}");
+                                }
+                                refresh.set(refresh() + 1);
+                            }
+                        });
+                        show_delete.set(false);
+                    },
+                    "確定"
+                }
+            }
+        }
+        ModalDialog {
+            visible: *show_create_word.read(),
+            title: "新增字彙",
+            div { class: "update-body",
+                select {
+                    class: "word-form-select",
+                    style: "margin-bottom: 12px;",
+                    oninput: move |e| {
+                        if let Ok(idx) = e.value().parse::<usize>() {
+                            selected_deck_idx.set(Some(idx));
+                        } else {
+                            selected_deck_idx.set(None);
+                        }
+                    },
+                    option {
+                        value: "",
+                        disabled: true,
+                        selected: selected_deck_idx.read().is_none(),
+                        "選擇牌組"
+                    }
+                    {all_decks.cloned().into_iter().enumerate().map(|(i, d)| {
+                        let name = d.name.clone();
+                        let sel = *selected_deck_idx.read() == Some(i);
+                        rsx! {
+                            option {
+                                value: "{i}",
+                                selected: sel,
+                                "{name}"
+                            }
+                        }
+                    })}
+                }
+                div { class: "word-form",
+                    div { class: "word-form-row",
+                        input {
+                            class: "word-form-input",
+                            placeholder: "單字 *",
+                            value: "{create_word_front}",
+                            oninput: move |e| create_word_front.set(e.value()),
+                        }
+                    }
+                    div { class: "word-form-row",
+                        input {
+                            class: "word-form-input",
+                            placeholder: "翻譯 *",
+                            value: "{create_word_back}",
+                            oninput: move |e| create_word_back.set(e.value()),
+                        }
+                    }
+                    div { class: "word-form-row word-form-pos-row",
+                        select {
+                            class: "word-form-select",
+                            value: "{create_word_pos}",
+                            oninput: move |e| create_word_pos.set(e.value()),
+                            {pos_options.into_iter().map(|p| {
+                                let val = p;
+                                rsx! {
+                                    option {
+                                        value: "{val}",
+                                        selected: *create_word_pos.read() == val,
+                                        if val.is_empty() { "詞性" } else { "{val}" }
+                                    }
+                                }
+                            })}
+                        }
+                        input {
+                            class: "word-form-input",
+                            placeholder: "發音",
+                            value: "{create_word_pron}",
+                            oninput: move |e| create_word_pron.set(e.value()),
+                        }
+                    }
+                    div { class: "word-form-row",
+                        input {
+                            class: "word-form-input",
+                            placeholder: "例句",
+                            value: "{create_word_example}",
+                            oninput: move |e| create_word_example.set(e.value()),
+                        }
+                    }
+                    div { class: "word-form-row",
+                        input {
+                            class: "word-form-input",
+                            placeholder: "同義詞",
+                            value: "{create_word_synonym}",
+                            oninput: move |e| create_word_synonym.set(e.value()),
+                        }
+                        input {
+                            class: "word-form-input",
+                            placeholder: "反義詞",
+                            value: "{create_word_antonym}",
+                            oninput: move |e| create_word_antonym.set(e.value()),
+                        }
+                    }
+                    div { class: "word-form-row",
+                        input {
+                            class: "word-form-input",
+                            placeholder: "標籤 (逗號分隔)",
+                            value: "{create_word_tags}",
+                            oninput: move |e| create_word_tags.set(e.value()),
+                        }
+                    }
+                }
+            }
+            div { class: "update-actions",
+                button {
+                    class: "update-btn secondary",
+                    onclick: move |_| show_create_word.set(false),
+                    "取消"
+                }
+                button {
+                    class: "update-btn primary",
+                    disabled: selected_deck_idx.read().is_none() || all_decks.read().is_empty(),
+                    onclick: move |_| {
+                        let front = create_word_front.read().trim().to_string();
+                        let back = create_word_back.read().trim().to_string();
+                        if front.is_empty() || back.is_empty() { return; }
+                        let decks = all_decks.cloned();
+                        let Some(idx) = *selected_deck_idx.read() else { return; };
+                        if idx >= decks.len() { return; }
+                        let deck_id = decks[idx].id;
+                        let pos = create_word_pos.read().clone();
+                        let pron = create_word_pron.read().clone();
+                        let example = create_word_example.read().clone();
+                        let synonym = create_word_synonym.read().clone();
+                        let antonym = create_word_antonym.read().clone();
+                        let tags_input = create_word_tags.read().clone();
+                        let tags_json = if tags_input.is_empty() {
+                            "[]".to_string()
+                        } else {
+                            let parts: Vec<String> = tags_input.split(',').map(|s| format!("\"{}\"", s.trim())).collect();
+                            format!("[{}]", parts.join(","))
+                        };
+                        let db = app.db.cloned();
+                        spawn(async move {
+                            if let Some(db) = db {
+                                let _ = db.add_word(deck_id, &front, &back, &pos, &pron, &example, &synonym, &antonym, &tags_json);
+                                refresh.set(refresh() + 1);
+                            }
+                        });
+                        show_create_word.set(false);
+                    },
+                    "確定"
+                }
+            }
         }
     }
 }
@@ -1893,17 +2741,10 @@ fn SettingsScreen() -> Element {
     let mut app = use_context::<AppSignals>();
     let mut settings_tab = use_signal(|| 0);
     let mut show_licenses = use_signal(|| false);
-    let mut selected_dep_name = use_signal(String::new);
-    let mut selected_dep_license = use_signal(String::new);
-    let show_detail = !selected_dep_name.read().is_empty();
-    let detail_name = match show_detail {
-        true => selected_dep_name.read().clone(),
-        false => String::new(),
-    };
-    let detail_text = match show_detail {
-        true => licenses::get_license_text(&selected_dep_license.read()).to_owned(),
-        false => String::new(),
-    };
+    let mut selected_dep: Signal<Option<(String, String)>> = use_signal(|| None);
+    let show_detail = selected_dep.read().is_some();
+    let detail_name = selected_dep.read().as_ref().map(|(n, _)| n.clone()).unwrap_or_default();
+    let detail_text = selected_dep.read().as_ref().map(|(_, l)| licenses::get_license_text(l).to_owned()).unwrap_or_default();
 
     rsx! {
         div { class: "settings-screen",
@@ -2111,7 +2952,7 @@ fn SettingsScreen() -> Element {
                     FsrsSettings {}
                 }
             }
-            div { class: "settings-version", "v1.2" }
+            div { class: "settings-version", "v{APP_VERSION}" }
         }
         if *show_licenses.read() {
             div { class: "license-overlay",
@@ -2133,8 +2974,7 @@ fn SettingsScreen() -> Element {
                                     key: "{dep.name}",
                                     class: "license-item",
                                     onclick: move |_| {
-                                        selected_dep_name.set(n.clone());
-                                        selected_dep_license.set(lf.clone());
+                                        selected_dep.set(Some((n.clone(), lf.clone())));
                                     },
                                     span { class: "license-item-name", "{dep.name}" }
                                     span { class: "license-item-type", "{dep.license_display}" }
@@ -2155,8 +2995,7 @@ fn SettingsScreen() -> Element {
                             button {
                                 class: "license-detail-close",
                                 onclick: move |_| {
-                                    selected_dep_name.set(String::new());
-                                    selected_dep_license.set(String::new());
+                                    selected_dep.set(None);
                                 },
                                 span { class: "material-symbols-outlined", "arrow_back" }
                             }

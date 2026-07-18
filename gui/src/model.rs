@@ -109,6 +109,29 @@ impl FsrsConfig {
 pub struct Word {
     pub front: String,
     pub back: String,
+    #[serde(default)]
+    pub pos: String,
+    #[serde(default)]
+    pub pron: String,
+    #[serde(default)]
+    pub example: String,
+    #[serde(default)]
+    pub synonym: String,
+    #[serde(default)]
+    pub antonym: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Deck {
+    pub id: i64,
+    pub name: String,
+    pub color: String,
+    pub word_count: i64,
+    pub is_folder: bool,
+    pub parent_id: Option<i64>,
+    pub updated_at: String,
 }
 
 #[derive(Clone, PartialEq)]
