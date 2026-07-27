@@ -14,6 +14,8 @@ percent-encoding = "2"
 fastrand = "2"
 fsrs = "6"
 tokio = { version = "1", features = ["time"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+dirs = "6"
 
 # --- Quizlet scraper library ---
 quizlet_scraper = { path = "../quizlet_scraper" }
