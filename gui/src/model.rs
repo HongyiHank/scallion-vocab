@@ -140,6 +140,7 @@ pub enum Screen {
     Quiz,
     QuizFinished,
     Library,
+    DeckDetail { deck_id: i64 },
     Settings,
 }
 

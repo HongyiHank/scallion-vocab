@@ -246,6 +246,9 @@ fn App() -> Element {
                 // Settings screen → back to Upload
                 el = document.querySelector('.settings-close');
                 if (el) { el.click(); return; }
+                // Deck detail screen → back to Library
+                el = document.querySelector('.deck-detail-back');
+                if (el) { el.click(); return; }
                 // Library screen: 委派給 .library-back 處理（回上層或根目錄時觸發「再按一次以退出」）
                 el = document.querySelector('.library-back');
                 if (el) { el.click(); return; }
@@ -290,6 +293,7 @@ fn App() -> Element {
                     Screen::Quiz => rsx! { QuizScreen {} },
                     Screen::QuizFinished => rsx! { QuizFinished {} },
                     Screen::Library => rsx! { LibraryScreen {} },
+                    Screen::DeckDetail { .. } => rsx! { DeckDetailScreen {} },
                     Screen::Settings => rsx! { SettingsScreen {} },
                 }
             }
@@ -1933,7 +1937,7 @@ const DECK_COLORS: &[&str] = &[
 
 #[component]
 fn LibraryScreen() -> Element {
-    let app = use_context::<AppSignals>();
+    let mut app = use_context::<AppSignals>();
 
     let mut current_folder_id = use_signal(|| None::<i64>);
     let mut breadcrumb = use_signal(Vec::<Deck>::new);
@@ -2320,8 +2324,12 @@ fn LibraryScreen() -> Element {
                                 let color = item.color.clone();
                                 let wc = item.word_count;
                                 let ddate = item.updated_at.clone();
+                                let did = deck_id;
                                 rsx! {
-                                    div { key: "deck-{item.id}", class: "deck-item",
+                                    div {
+                                        key: "deck-{item.id}",
+                                        class: "deck-item",
+                                        onclick: move |_| app.screen.set(Screen::DeckDetail { deck_id: did }),
                                         span { class: "deck-color-dot", style: "background: {color}" }
                                         div { class: "deck-content",
                                             div { class: "deck-headline", "{deck_name}" }
@@ -2331,7 +2339,8 @@ fn LibraryScreen() -> Element {
                                             div { class: "deck-btns",
                                                 button {
                                                     class: "deck-btn",
-                                                    onclick: move |_| {
+                                                    onclick: move |e| {
+                                                        e.stop_propagation();
                                                         rename_target.set(deck_id);
                                                         rename_name.set(deck_name.clone());
                                                         is_folder_target.set(false);
@@ -2341,7 +2350,8 @@ fn LibraryScreen() -> Element {
                                                 }
                                                 button {
                                                     class: "deck-btn danger",
-                                                    onclick: move |_| {
+                                                    onclick: move |e| {
+                                                        e.stop_propagation();
                                                         delete_target.set(deck_id);
                                                         is_folder_target.set(false);
                                                         show_delete.set(true);
@@ -2728,6 +2738,288 @@ fn LibraryScreen() -> Element {
                             }
                         });
                         show_create_word.set(false);
+                    },
+                    "確定"
+                }
+            }
+        }
+    }
+}
+
+const POS_OPTIONS: &[&str] = &["", "名詞", "動詞", "形容詞", "副詞", "介系詞", "連接詞", "代名詞", "感嘆詞", "片語", "其他"];
+
+#[component]
+fn DeckDetailScreen() -> Element {
+    let mut app = use_context::<AppSignals>();
+    let deck_id = match *app.screen.read() {
+        Screen::DeckDetail { deck_id } => deck_id,
+        _ => return rsx! { div {} },
+    };
+    let mut refresh = use_signal(|| 0u64);
+
+    let deck = use_resource(move || {
+        let _ = *refresh.read();
+        let db = app.db.cloned();
+        let did = deck_id;
+        async move {
+            db.as_ref().and_then(|db| db.get_deck(did).ok())
+        }
+    });
+    let words = use_resource(move || {
+        let _ = *refresh.read();
+        let db = app.db.cloned();
+        let did = deck_id;
+        async move {
+            db.as_ref().and_then(|db| db.list_words_by_deck(did).ok())
+        }
+    });
+
+    let deck_data = deck.read_unchecked().clone().flatten();
+    let word_list = words.read_unchecked().clone().flatten().unwrap_or_default();
+
+    let deck_name = deck_data.as_ref().map(|d| d.name.clone()).unwrap_or_default();
+    let word_count = deck_data.as_ref().map(|d| d.word_count).unwrap_or(0);
+
+    let mut show_edit = use_signal(|| false);
+    let mut edit_id = use_signal(|| 0i64);
+    let mut edit_front = use_signal(String::new);
+    let mut edit_back = use_signal(String::new);
+    let mut edit_pos = use_signal(String::new);
+    let mut edit_pron = use_signal(String::new);
+    let mut edit_example = use_signal(String::new);
+    let mut edit_synonym = use_signal(String::new);
+    let mut edit_antonym = use_signal(String::new);
+    let mut edit_tags = use_signal(String::new);
+    let mut show_delete_confirm = use_signal(|| false);
+    let mut delete_target = use_signal(|| 0i64);
+
+    rsx! {
+        div { class: "deck-detail-screen",
+            div { class: "deck-detail-topbar",
+                button {
+                    class: "deck-detail-back",
+                    onclick: move |_| app.screen.set(Screen::Library),
+                    span { class: "material-symbols-outlined", "arrow_back" }
+                }
+                div { class: "deck-detail-title",
+                    div { class: "deck-detail-name", "{deck_name}" }
+                    div { class: "deck-detail-count", "{word_count} 詞" }
+                }
+            }
+            if word_list.is_empty() {
+                div { class: "deck-detail-empty",
+                    span { class: "material-symbols-outlined", "playlist_remove" }
+                    span { "尚無字彙" }
+                }
+            } else {
+                div { class: "deck-detail-list",
+                    {word_list.into_iter().map(|(wid, w)| {
+                        rsx! {
+                            div { class: "deck-word-item",
+                                div { class: "word-main",
+                                    div { class: "word-front", "{w.front}" }
+                                    div { class: "word-back", "{w.back}" }
+                                    div { class: "word-meta",
+                                        {(!w.pos.is_empty()).then(|| rsx! {
+                                            span { class: "word-pos-tag", "{w.pos}" }
+                                        })}
+                                        {(!w.pron.is_empty()).then(|| rsx! {
+                                            span { class: "word-pron", "{w.pron}" }
+                                        })}
+                                    }
+                                    {(!w.example.is_empty()).then(|| rsx! {
+                                        div { class: "word-example-row",
+                                            span { class: "word-field-label", "例句" }
+                                            div { class: "word-example-scroll",
+                                                span { "{w.example}" }
+                                            }
+                                        }
+                                    })}
+                                    {(!w.synonym.is_empty()).then(|| rsx! {
+                                        div { class: "word-field-row",
+                                            span { class: "word-field-label", "同義詞" }
+                                            span { "{w.synonym}" }
+                                        }
+                                    })}
+                                    {(!w.antonym.is_empty()).then(|| rsx! {
+                                        div { class: "word-field-row",
+                                            span { class: "word-field-label", "反義詞" }
+                                            span { "{w.antonym}" }
+                                        }
+                                    })}
+                                }
+                                button {
+                                    class: "word-edit-btn",
+                                    onclick: move |_| {
+                                        edit_id.set(wid);
+                                        edit_front.set(w.front.clone());
+                                        edit_back.set(w.back.clone());
+                                        edit_pos.set(w.pos.clone());
+                                        edit_pron.set(w.pron.clone());
+                                        edit_example.set(w.example.clone());
+                                        edit_synonym.set(w.synonym.clone());
+                                        edit_antonym.set(w.antonym.clone());
+                                        let tag_str = w.tags.join(", ");
+                                        edit_tags.set(tag_str);
+                                        show_edit.set(true);
+                                    },
+                                    span { class: "material-symbols-outlined", "edit" }
+                                }
+                            }
+                        }
+                    })}
+                }
+            }
+        }
+
+        ModalDialog {
+            visible: *show_edit.read(),
+            title: "編輯字彙",
+            div { class: "update-body",
+                div { class: "word-form",
+                    div { class: "word-form-row",
+                        input {
+                            class: "word-form-input",
+                            placeholder: "單字 *",
+                            value: "{edit_front}",
+                            oninput: move |e| edit_front.set(e.value()),
+                        }
+                    }
+                    div { class: "word-form-row",
+                        input {
+                            class: "word-form-input",
+                            placeholder: "翻譯 *",
+                            value: "{edit_back}",
+                            oninput: move |e| edit_back.set(e.value()),
+                        }
+                    }
+                    div { class: "word-form-row word-form-pos-row",
+                        select {
+                            class: "word-form-select",
+                            value: "{edit_pos}",
+                            oninput: move |e| edit_pos.set(e.value()),
+                            {POS_OPTIONS.into_iter().map(|p| {
+                                let val = p;
+                                rsx! {
+                                    option {
+                                        value: "{val}",
+                                        selected: *edit_pos.read() == *val,
+                                        if val.is_empty() { "詞性" } else { "{val}" }
+                                    }
+                                }
+                            })}
+                        }
+                        input {
+                            class: "word-form-input",
+                            placeholder: "發音",
+                            value: "{edit_pron}",
+                            oninput: move |e| edit_pron.set(e.value()),
+                        }
+                    }
+                    div { class: "word-form-row",
+                        input {
+                            class: "word-form-input",
+                            placeholder: "例句",
+                            value: "{edit_example}",
+                            oninput: move |e| edit_example.set(e.value()),
+                        }
+                    }
+                    div { class: "word-form-row",
+                        input {
+                            class: "word-form-input",
+                            placeholder: "同義詞",
+                            value: "{edit_synonym}",
+                            oninput: move |e| edit_synonym.set(e.value()),
+                        }
+                        input {
+                            class: "word-form-input",
+                            placeholder: "反義詞",
+                            value: "{edit_antonym}",
+                            oninput: move |e| edit_antonym.set(e.value()),
+                        }
+                    }
+                    div { class: "word-form-row",
+                        input {
+                            class: "word-form-input",
+                            placeholder: "標籤 (逗號分隔)",
+                            value: "{edit_tags}",
+                            oninput: move |e| edit_tags.set(e.value()),
+                        }
+                    }
+                }
+            }
+            div { class: "dialog-actions-row",
+                button {
+                    class: "dialog-btn-text danger",
+                    onclick: move |_| {
+                        delete_target.set(*edit_id.read());
+                        show_edit.set(false);
+                        show_delete_confirm.set(true);
+                    },
+                    span { class: "material-symbols-outlined", "delete" }
+                    " 刪除"
+                }
+                div { class: "spacer" }
+                button {
+                    class: "dialog-btn-text",
+                    onclick: move |_| show_edit.set(false),
+                    "取消"
+                }
+                button {
+                    class: "dialog-btn-filled",
+                    onclick: move |_| {
+                        let front = edit_front.read().trim().to_string();
+                        let back = edit_back.read().trim().to_string();
+                        if front.is_empty() || back.is_empty() { return; }
+                        let wid = *edit_id.read();
+                        let pos = edit_pos.read().clone();
+                        let pron = edit_pron.read().clone();
+                        let example = edit_example.read().clone();
+                        let synonym = edit_synonym.read().clone();
+                        let antonym = edit_antonym.read().clone();
+                        let tags_input = edit_tags.read().clone();
+                        let tags_json = if tags_input.is_empty() {
+                            "[]".to_string()
+                        } else {
+                            let parts: Vec<String> = tags_input.split(',').map(|s| format!("\"{}\"", s.trim())).collect();
+                            format!("[{}]", parts.join(","))
+                        };
+                        let db = app.db.cloned();
+                        spawn(async move {
+                            if let Some(db) = db {
+                                let _ = db.update_word(wid, &front, &back, &pos, &pron, &example, &synonym, &antonym, &tags_json);
+                                refresh.set(refresh() + 1);
+                            }
+                        });
+                        show_edit.set(false);
+                    },
+                    "儲存"
+                }
+            }
+        }
+
+        ModalDialog {
+            visible: *show_delete_confirm.read(),
+            title: "刪除字彙",
+            div { class: "update-body", "確定要刪除此字彙？" }
+            div { class: "update-actions",
+                button {
+                    class: "update-btn secondary",
+                    onclick: move |_| show_delete_confirm.set(false),
+                    "取消"
+                }
+                button {
+                    class: "update-btn primary",
+                    onclick: move |_| {
+                        let wid = *delete_target.read();
+                        let db = app.db.cloned();
+                        spawn(async move {
+                            if let Some(db) = db {
+                                let _ = db.delete_word(wid);
+                                refresh.set(refresh() + 1);
+                            }
+                        });
+                        show_delete_confirm.set(false);
                     },
                     "確定"
                 }

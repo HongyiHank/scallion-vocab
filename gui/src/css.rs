@@ -1080,6 +1080,33 @@ button.history-item:active { transform: scale(0.98); }
 }
 .update-btn.secondary:hover { background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
 
+/* ── Dialog action row (edit word dialog) ── */
+.dialog-actions-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 24px;
+}
+.dialog-actions-row .spacer { flex: 1; }
+.dialog-btn-text {
+    padding: 8px 16px; min-height: 40px; border: none; border-radius: var(--shape-full);
+    background: transparent; font-size: .9em; font-weight: 500; cursor: pointer; font-family: inherit;
+    color: var(--md-sys-color-primary);
+    transition: background var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard),
+                transform .1s;
+}
+.dialog-btn-text:active { transform: scale(0.97); }
+.dialog-btn-text:hover { background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
+.dialog-btn-text.danger { color: var(--md-sys-color-error); }
+.dialog-btn-text.danger:hover { background: color-mix(in srgb, var(--md-sys-color-error) 8%, transparent); }
+.dialog-btn-filled {
+    padding: 8px 24px; min-height: 40px; border: none; border-radius: var(--shape-full);
+    background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary);
+    font-size: .9em; font-weight: 500; cursor: pointer; font-family: inherit;
+    transition: box-shadow var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard),
+                transform .1s;
+}
+.dialog-btn-filled:active { transform: scale(0.97); }
+.dialog-btn-filled:hover { box-shadow: var(--elev-1); }
+
 /* ── Download progress inside update dialog ── */
 .dl-progress-body {
     display: flex;
@@ -1539,6 +1566,117 @@ button.history-item:active { transform: scale(0.98); }
 .word-detail-example {
     font-style: italic;
     color: var(--md-sys-color-primary);
+}
+
+/* ── Deck detail screen ── */
+.deck-detail-screen {
+    display: flex; flex-direction: column; flex: 1; width: 100%;
+    align-self: stretch;
+    animation: fadeUp var(--md-sys-motion-duration-long3) var(--md-sys-motion-easing-emphasized-decelerate);
+}
+.deck-detail-topbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 4px 4px 4px; height: 64px; flex-shrink: 0;
+}
+.deck-detail-back {
+    width: 48px; height: 48px; border: none; border-radius: var(--shape-full);
+    background: transparent; color: var(--md-sys-color-on-surface);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 1.4rem; flex-shrink: 0;
+    transition: background var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
+}
+.deck-detail-back:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 6%, transparent); }
+.deck-detail-title {
+    flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+}
+.deck-detail-name {
+    font-size: 1.25rem; font-weight: 500; color: var(--md-sys-color-on-surface);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.deck-detail-count {
+    font-size: .75rem; font-weight: 400;
+    color: var(--md-sys-color-on-surface-variant);
+}
+.deck-detail-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    flex: 1; gap: 12px; padding: 48px 24px;
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: 1rem; font-weight: 500;
+}
+.deck-detail-empty span.material-symbols-outlined {
+    font-size: 3rem; opacity: .5;
+}
+.deck-detail-list {
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 8px 16px 16px; overflow-y: auto; flex: 1;
+    -webkit-overflow-scrolling: touch;
+}
+.deck-word-item {
+    background: var(--md-sys-color-surface-container);
+    border-radius: var(--shape-md);
+    padding: 16px 16px 16px 16px;
+    display: flex; gap: 8px; align-items: flex-start;
+}
+.deck-word-item .word-main {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; gap: 8px;
+}
+.word-edit-btn {
+    width: 36px; height: 36px; border: none; border-radius: 50%;
+    background: transparent; color: var(--md-sys-color-on-surface-variant);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: -4px; margin-right: -8px;
+    font-size: 1.1rem;
+    transition: background var(--md-sys-motion-duration-short3, 200ms) var(--md-sys-motion-easing-standard, ease);
+}
+.word-edit-btn:active { background: color-mix(in srgb, var(--md-sys-color-on-surface) 10%, transparent); }
+.deck-word-item .word-front {
+    font-size: 1.15rem; font-weight: 700;
+    color: var(--md-sys-color-primary);
+    line-height: 1.4;
+}
+.deck-word-item .word-back {
+    font-size: .95rem; font-weight: 500;
+    color: var(--md-sys-color-on-surface);
+    line-height: 1.4;
+}
+.deck-word-item .word-meta {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.deck-word-item .word-pos-tag {
+    display: inline-block; padding: 2px 10px;
+    border-radius: var(--shape-full);
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    font-size: .7rem; font-weight: 600;
+}
+.deck-word-item .word-pron {
+    font-size: .8rem; font-style: italic;
+    color: var(--md-sys-color-on-surface-variant);
+}
+.deck-word-item .word-example-row {
+    display: flex; flex-direction: column; gap: 4px;
+}
+.deck-word-item .word-field-label {
+    font-size: .65rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--md-sys-color-on-surface-variant); opacity: .7;
+}
+.deck-word-item .word-example-scroll {
+    overflow-x: auto; white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    font-size: .85rem; font-style: italic;
+    color: var(--md-sys-color-primary);
+    padding-bottom: 4px;
+}
+.deck-word-item .word-example-scroll::-webkit-scrollbar { height: 3px; }
+.deck-word-item .word-example-scroll::-webkit-scrollbar-thumb {
+    background: var(--md-sys-color-outline-variant); border-radius: 4px;
+}
+.deck-word-item .word-field-row {
+    display: flex; flex-direction: column; gap: 2px;
+    font-size: .85rem; color: var(--md-sys-color-on-surface);
 }
 
 /* ── Settings screen ── */

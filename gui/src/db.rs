@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::log;
-use crate::model::Deck;
+use crate::model::{Deck, Word};
 
 const DECK_COLORS: &[&str] = &[
     "#006c45", "#008757", "#279b57", "#4eb674",
@@ -319,6 +319,65 @@ impl Database {
             })?.collect::<Result<Vec<_>>>()?
         };
         Ok(rows)
+    }
+
+    pub fn get_deck(&self, deck_id: i64) -> Result<Deck> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT d.id, d.name, d.color, COALESCE(w.cnt, 0), d.is_folder, d.parent_id, substr(COALESCE(d.updated_at, ''), 1, 16)
+             FROM decks d
+             LEFT JOIN (SELECT deck_id, COUNT(*) AS cnt FROM words GROUP BY deck_id) w ON w.deck_id = d.id
+             WHERE d.id = ?1",
+            params![deck_id],
+            |r| {
+                Ok(Deck {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    color: r.get(2)?,
+                    word_count: r.get(3)?,
+                    is_folder: r.get::<_, i64>(4)? != 0,
+                    parent_id: r.get(5)?,
+                    updated_at: r.get(6)?,
+                })
+            },
+        )
+    }
+
+    pub fn list_words_by_deck(&self, deck_id: i64) -> Result<Vec<(i64, Word)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, front, back, pos, pron, example, synonym, antonym, tags FROM words WHERE deck_id = ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map(params![deck_id], |r| {
+            let id: i64 = r.get(0)?;
+            Ok((id, Word {
+                front: r.get(1)?,
+                back: r.get(2)?,
+                pos: r.get(3)?,
+                pron: r.get(4)?,
+                example: r.get(5)?,
+                synonym: r.get(6)?,
+                antonym: r.get(7)?,
+                tags: serde_json::from_str(&r.get::<_, String>(8)?).unwrap_or_default(),
+            }))
+        })?.collect::<Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn update_word(&self, id: i64, front: &str, back: &str,
+        pos: &str, pron: &str, example: &str, synonym: &str, antonym: &str, tags: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE words SET front=?1, back=?2, pos=?3, pron=?4, example=?5, synonym=?6, antonym=?7, tags=?8 WHERE id=?9",
+            params![front, back, pos, pron, example, synonym, antonym, tags, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_word(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM words WHERE id = ?1", params![id])?;
+        Ok(())
     }
 
     pub fn rename_deck(&self, id: i64, name: &str) -> Result<()> {
