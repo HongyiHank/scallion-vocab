@@ -3,15 +3,16 @@ mod css;
 mod model;
 mod licenses;
 mod db;
+mod import;
 
 use dioxus::document;
 use dioxus::prelude::*;
 use db::Database;
 use model::{sleep_ms, Deck, FsrsConfig, FsrsRating, QuizState, Screen, Word};
-use quizlet_scraper::{build_flashcards_url, extract_deck_id, extract_title, scrape_quizlet_html};
-use percent_encoding::percent_decode;
+use quizlet_scraper::{extract_title, scrape_quizlet_html};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
+use import::*;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -243,8 +244,10 @@ fn App() -> Element {
                 // License list → close
                 el = document.querySelector('.license-dialog-close');
                 if (el) { el.click(); return; }
-                // Settings screen → back to Upload
+                // Settings/Import screen → back to Upload
                 el = document.querySelector('.settings-close');
+                if (el) { el.click(); return; }
+                el = document.querySelector('.import-back');
                 if (el) { el.click(); return; }
                 // Deck detail screen → back to Library
                 el = document.querySelector('.deck-detail-back');
@@ -295,10 +298,11 @@ fn App() -> Element {
                     Screen::Library => rsx! { LibraryScreen {} },
                     Screen::DeckDetail { .. } => rsx! { DeckDetailScreen {} },
                     Screen::Settings => rsx! { SettingsScreen {} },
+                    Screen::Import => rsx! { ImportScreen {} },
                 }
             }
             match screen {
-                Screen::Upload | Screen::Library | Screen::Settings => rsx! { NavBar {} },
+                Screen::Upload | Screen::Library | Screen::Settings | Screen::Import => rsx! { NavBar {} },
                 _ => rsx! {},
             }
         }
@@ -571,140 +575,6 @@ async fn persist_update_check_enabled(enabled: bool) {
     if let Err(e) = document::eval(&js).await {
         log!("[Prefs::UpdateCheck] save failed: {e}");
     }
-}
-
-fn normalize_quizlet_url(raw: &str) -> Option<String> {
-    let raw = raw.trim();
-
-    if raw.is_empty() {
-        return None;
-    }
-
-    let with_scheme = if raw.starts_with("http://") || raw.starts_with("https://") {
-        raw.to_owned()
-    } else {
-        format!("https://{raw}")
-    };
-
-    let parsed = url::Url::parse(&with_scheme).ok()?;
-    let host = parsed.host_str()?.to_ascii_lowercase();
-
-    if host == "quizlet.com" || host.ends_with(".quizlet.com") {
-        Some(parsed.to_string())
-    } else {
-        None
-    }
-}
-
-fn parse_quizlet_urls(input: &str) -> Vec<String> {
-    let mut seen = HashSet::new();
-
-    input
-        .lines()
-        .filter_map(normalize_quizlet_url)
-        .filter(|url| seen.insert(url.clone()))
-        .collect()
-}
-
-fn clean_recent_urls(urls: Vec<String>, max_len: usize) -> Vec<String> {
-    let mut seen = HashSet::new();
-
-    urls.into_iter()
-        .filter_map(|url| normalize_quizlet_url(&url))
-        .filter(|url| seen.insert(url.clone()))
-        .take(max_len)
-        .collect()
-}
-
-fn format_url_title(url: &str) -> String {
-    let parsed = match url::Url::parse(url) {
-        Ok(u) => u,
-        Err(_) => return url.to_string(),
-    };
-
-    let segment = parsed
-        .path_segments()
-        .and_then(|segments| {
-            segments
-                .filter(|s| !s.is_empty() && !s.contains("quizlet.com"))
-                .last()
-        })
-        .unwrap_or("");
-
-    if segment.is_empty() {
-        return url.to_string();
-    }
-
-    let decoded = percent_decode(segment.as_bytes())
-        .decode_utf8_lossy();
-
-    decoded
-        .replace('-', " ")
-        .split_whitespace()
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-async fn save_recent_urls(urls: &[String]) {
-    let Ok(json) = serde_json::to_string(urls) else {
-        log!("[Prefs::SaveUrls] failed to serialize urls");
-        return;
-    };
-
-    let js_string = serde_json::to_string(&json).unwrap_or_else(|_| "\"[]\"".to_string());
-
-    let script = format!(
-        r#"
-        try {{
-            localStorage.setItem('recent_urls', {js_string});
-        }} catch (_) {{}}
-        "#
-    );
-
-    if let Err(e) = document::eval(&script).await {
-        log!("[Prefs::SaveUrls] eval failed: {e}");
-    }
-}
-
-fn decode_anki_cell(input: &str) -> String {
-    input
-        .replace("<br />", "\n")
-        .replace("<br/>", "\n")
-        .replace("<br>", "\n")
-        // &amp; must be first so double-encoded entities decode correctly
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .trim()
-        .to_string()
-}
-
-fn parse_anki_text(text: &str) -> Vec<Word> {
-    let clean = text.strip_prefix('\u{FEFF}').unwrap_or(text);
-
-    clean
-        .lines()
-        .filter_map(|line| {
-            let (front, back) = line.split_once('\t')?;
-            let front = decode_anki_cell(front);
-            let back = decode_anki_cell(back);
-
-            if front.is_empty() || back.is_empty() {
-                None
-            } else {
-                Some(Word { front, back, pos: String::new(), pron: String::new(), example: String::new(), synonym: String::new(), antonym: String::new(), tags: Vec::new() })
-            }
-        })
-        .collect()
 }
 
 #[component]
@@ -1104,7 +974,7 @@ fn UploadScreen() -> Element {
 
 type FetchResult<T> = Result<T, String>;
 
-async fn fetch_html_via_webview(url: &str) -> FetchResult<String> {
+pub(crate) async fn fetch_html_via_webview(url: &str) -> FetchResult<String> {
     let url_js = serde_json::to_string(url).unwrap_or_else(|_| "\"\"".to_string());
     let js = format!(
         r#"
@@ -1149,67 +1019,7 @@ async fn fetch_html_via_webview(url: &str) -> FetchResult<String> {
         Ok(Err(e)) => Err(format!("WebView eval failed: {e}")),
         Err(_) => Err("WebView fetch timed out after 25s".to_string()),
     }
-}
-
-async fn fetch_quizlet_multi(urls: &[String]) -> (Vec<Word>, Vec<String>) {
-    let mut all_words = Vec::new();
-    let mut seen = HashSet::new();
-    let mut errors = Vec::new();
-
-    for url in urls {
-        log!("[Upload::Fetch] scraping URL: {url}");
-
-        let page_url = match extract_deck_id(url) {
-            Ok(deck_id) => build_flashcards_url(&deck_id),
-            Err(e) => {
-                let msg = format!("{url}: {e}");
-                log!("[Upload::Fetch] invalid URL: {e}");
-                errors.push(msg);
-                continue;
-            }
-        };
-
-        let cards = match fetch_html_via_webview(&page_url).await {
-            Ok(html) => {
-                log!("[Upload::Fetch] WebView fetch got {} bytes, parsing", html.len());
-                match scrape_quizlet_html(&html) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        let msg = format!("{url}: {e}");
-                        log!("[Upload::Fetch] HTML parse failed: {e}");
-                        errors.push(msg);
-                        continue;
-                    }
-                }
-            }
-            Err(e) => {
-                let msg = format!("{url}: {e}");
-                log!("[Upload::Fetch] WebView fetch failed: {e}");
-                errors.push(msg);
-                continue;
-            }
-        };
-
-        let raw_count = cards.len();
-        let mut added = 0;
-        for card in cards {
-            let front = card.term.trim().to_string();
-            let back = card.definition.trim().to_string();
-            if front.is_empty() || back.is_empty() {
-                continue;
-            }
-            if seen.insert((front.clone(), back.clone())) {
-                all_words.push(Word { front, back, pos: String::new(), pron: String::new(), example: String::new(), synonym: String::new(), antonym: String::new(), tags: Vec::new() });
-                added += 1;
-            }
-        }
-        log!("[Upload::Fetch] {url}: {added}/{raw_count} cards added (total: {})", all_words.len());
-    }
-
-    (all_words, errors)
-}
-
-fn scrape_words_from_html(html: &str) -> FetchResult<(Vec<Word>, String)> {
+}fn scrape_words_from_html(html: &str) -> FetchResult<(Vec<Word>, String)> {
     let cards = scrape_quizlet_html(html).map_err(|e| format!("{e}"))?;
     let title = extract_title(html);
 
@@ -1901,6 +1711,7 @@ fn NavBar() -> Element {
     let items = [
         (Screen::Library, "menu_book", "字庫"),
         (Screen::Upload, "note_add", "考試"),
+        (Screen::Import, "file_upload", "匯入"),
         (Screen::Settings, "settings", "設定"),
     ];
 
@@ -3298,6 +3109,447 @@ fn SettingsScreen() -> Element {
                 }
             }
         })}
+    }
+}
+
+
+#[component]
+fn ImportScreen() -> Element {
+    let mut app = use_context::<AppSignals>();
+    let mut tab = use_signal(|| 0usize);
+    let mut paste_text = use_signal(String::new);
+    let mut url_text = use_signal(String::new);
+    let mut parsed = use_signal::<Option<(Vec<Word>, String)>>(|| None);
+    let mut loading = use_signal(|| false);
+    let mut error = use_signal(String::new);
+    let mut selected_deck_id = use_signal::<Option<i64>>(|| None);
+    let mut show_create_deck = use_signal(|| false);
+    let mut create_deck_name = use_signal(String::new);
+    let mut file_name = use_signal::<Option<String>>(|| None);
+    let mut fetch_err = use_signal(String::new);
+
+    // 目標牌組資料夾瀏覽
+    let mut dest_folder = use_signal::<Option<i64>>(|| None);
+    let mut dest_items = use_signal(Vec::<Deck>::new);
+    let mut dest_breadcrumb = use_signal(Vec::<Deck>::new);
+    let mut dest_refresh = use_signal(|| 0u64);
+    use_effect(move || {
+        let _ = *dest_refresh.read();
+        let fid = *dest_folder.read();
+        let db = app.db.cloned();
+        spawn(async move {
+            let Some(db) = db else { return };
+            if let Ok(list) = db.list_by_parent(fid) {
+                let mut folders: Vec<Deck> = list.iter().filter(|d| d.is_folder).cloned().collect();
+                let mut decks: Vec<Deck> = list.iter().filter(|d| !d.is_folder).cloned().collect();
+                folders.sort_by(|a, b| a.name.cmp(&b.name));
+                decks.sort_by(|a, b| a.name.cmp(&b.name));
+                dest_items.set(folders.into_iter().chain(decks).collect());
+            }
+            if let Ok(bc) = db.get_folder_path(fid) {
+                dest_breadcrumb.set(bc);
+            }
+        });
+    });
+
+    let mut choose_file = move |accept: &str| {
+        loading.set(true);
+        let accept = accept.to_string();
+        spawn(async move {
+            let js = format!(
+                r#"let i=document.createElement('input');i.type='file';i.accept='{accept}';
+                i.onchange=async()=>{{try{{let f=i.files[0];if(!f){{dioxus.send('')}}else{{let b=await f.arrayBuffer();let a=new Uint8Array(b);dioxus.send(JSON.stringify({{name:f.name,data:Array.from(a)}}))}}}}
+                catch(e){{dioxus.send('')}}}};
+                i.addEventListener('cancel',()=>dioxus.send(''));i.click();
+                setTimeout(()=>dioxus.send(''),60000);"#
+            );
+            let mut eval = document::eval(&js);
+            match eval.recv::<String>().await {
+                Ok(json) if !json.is_empty() => {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json) {
+                        let name = val["name"].as_str().unwrap_or("");
+                        if let Some(arr) = val["data"].as_array() {
+                            let bytes: Vec<u8> = arr.iter().filter_map(|v| v.as_u64()).map(|v| v as u8).collect();
+                            file_name.set(Some(name.to_string()));
+                            let result = if name.ends_with(".apkg") { parse_apkg(&bytes) } else { Ok(parse_anki_text(&String::from_utf8_lossy(&bytes))) };
+                            match result {
+                                Ok(words) if !words.is_empty() => {
+                                    let label = format!("「{}」— {} 張卡片", name, words.len());
+                                    parsed.set(Some((words, label)));
+                                    error.set(String::new());
+                                }
+                                _ => error.set("檔案中無有效卡片".to_string()),
+                            }
+                        }
+                    }
+                }
+                _ => error.set("已取消選擇檔案".to_string()),
+            }
+            loading.set(false);
+        });
+    };
+
+    let mut parse_paste = move || {
+        let text = paste_text.read().trim().to_string();
+        if text.is_empty() { error.set("請輸入或貼上 Anki 文字".to_string()); return; }
+        let words = parse_anki_text(&text);
+        if words.is_empty() { error.set("無法解析任何卡片，請確認格式為「英文\\t中文」".to_string()); return; }
+        let label = format!("手動輸入 — {} 張卡片", words.len());
+        parsed.set(Some((words, label)));
+        error.set(String::new());
+    };
+
+    let mut parse_url = move || {
+        let urls = parse_quizlet_urls(&url_text.read());
+        if urls.is_empty() { error.set("請輸入有效的 Quizlet 網址".to_string()); return; }
+        loading.set(true);
+        fetch_err.set(String::new());
+        spawn(async move {
+            let (all_words, errors) = fetch_quizlet_multi(&urls).await;
+            if all_words.is_empty() {
+                fetch_err.set(errors.join("\n"));
+            } else {
+                let label = format!("Quizlet — {} 張卡片", all_words.len());
+                parsed.set(Some((all_words, label)));
+                error.set(String::new());
+                let mut recent = app.recent_urls.cloned();
+                for u in &urls {
+                    recent.retain(|x| x != u);
+                    recent.insert(0, u.clone());
+                }
+                recent.truncate(MAX_RECENT_URLS);
+                app.recent_urls.set(recent.clone());
+                save_recent_urls(&recent).await;
+            }
+            loading.set(false);
+        });
+    };
+
+    let mut do_import = move || {
+        let Some((ref words, _)) = *parsed.read() else { return };
+        if words.is_empty() { return; }
+        let deck_id = *selected_deck_id.read();
+        let deck_name = create_deck_name.read().trim().to_string();
+        if deck_id.is_none() && deck_name.is_empty() { error.set("請選擇目標牌組或輸入新牌組名稱".to_string()); return; }
+        loading.set(true);
+        let words = words.clone();
+        let db = app.db.cloned();
+        let folder = *dest_folder.read();
+        spawn(async move {
+            let Some(db) = db else { loading.set(false); return };
+            let target_id = match deck_id {
+                Some(id) => id,
+                None => match db.create_deck(&deck_name, folder) {
+                    Ok(d) => d.id,
+                    Err(_) => { loading.set(false); error.set("無法建立牌組".to_string()); return; }
+                },
+            };
+            let mut ok = 0usize;
+            let mut fail = 0usize;
+            for w in &words {
+                if db.add_word(target_id, &w.front, &w.back, "", "", "", "", "", "[]").is_ok() {
+                    ok += 1;
+                } else {
+                    fail += 1;
+                }
+            }
+            loading.set(false);
+            parsed.set(None);
+            selected_deck_id.set(None);
+            show_create_deck.set(false);
+            create_deck_name.set(String::new());
+            file_name.set(None);
+            dest_refresh.set(dest_refresh() + 1);
+            error.set(String::new());
+            let msg = if fail > 0 {
+                format!("已匯入 {ok} 張，{fail} 張失敗")
+            } else {
+                format!("已匯入 {ok} 張卡片")
+            };
+            push_toast(app, msg);
+        });
+    };
+
+    // Clone short-lived reads so async writes from use_effect are visible next frame
+    let dest_bc = dest_breadcrumb.read().clone();
+    let dest_items_vec = dest_items.read().clone();
+
+    rsx! {
+        div { class: "import-wrapper",
+            section { class: "import-container",
+                h2 { "匯入" }
+                p { class: "import-subtitle", "從 Anki 或 Quizlet 匯入單字到字庫" }
+
+                div { class: "import-tabs",
+                    button {
+                        class: if *tab.read() == 0 { "import-tab active" } else { "import-tab" },
+                        onclick: move |_| { tab.set(0); parsed.set(None); error.set(String::new()); file_name.set(None); },
+                        "Anki 文字檔"
+                    }
+                    button {
+                        class: if *tab.read() == 1 { "import-tab active" } else { "import-tab" },
+                        onclick: move |_| { tab.set(1); parsed.set(None); error.set(String::new()); file_name.set(None); },
+                        "Anki 牌組包"
+                    }
+                    button {
+                        class: if *tab.read() == 2 { "import-tab active" } else { "import-tab" },
+                        onclick: move |_| { tab.set(2); parsed.set(None); error.set(String::new()); file_name.set(None); },
+                        "Quizlet"
+                    }
+                }
+
+                if *tab.read() == 0 {
+                    div { class: "tab-panel",
+                        div { class: "import-source",
+                            button {
+                                class: "file-picker",
+                                onclick: move |_| choose_file(".txt"),
+                                div { class: "file-picker-icon",
+                                    span { class: "material-symbols-outlined", "upload_file" }
+                                }
+                                div { class: "file-picker-text",
+                                    div { class: "file-picker-title", "選擇 .txt 檔案" }
+                                    div { class: "file-picker-sub", "Tab 分隔的 Anki 導出格式" }
+                                }
+                                span { class: "material-symbols-outlined", style: "color: var(--md-sys-color-on-surface-variant)", "chevron_right" }
+                            }
+                            {file_name.read().as_ref().filter(|_| *tab.read() == 0).map(|n| rsx! {
+                                div { class: "file-chip",
+                                    span { class: "material-symbols-outlined", "check" }
+                                    span { "{n}" }
+                                }
+                            })}
+                            div { class: "divider-or", "或手動輸入" }
+                            div { class: "section-label",
+                                span { class: "material-symbols-outlined", "edit_note" }
+                                "貼上 Anki 文字"
+                            }
+                            div { class: "md3-field",
+                                textarea {
+                                    rows: "5",
+                                    placeholder: "英文\t中文\nhello\t你好\nworld\t世界",
+                                    value: "{paste_text}",
+                                    oninput: move |e| paste_text.set(e.value()),
+                                }
+                            }
+                            div { class: "parse-row",
+                                button {
+                                    class: "md3-btn md3-btn--tonal",
+                                    onclick: move |_| {
+                                        if file_name.read().is_some() {
+                                            choose_file(".txt,.csv,.tsv");
+                                        } else {
+                                            parse_paste();
+                                        }
+                                    },
+                                    span { class: "material-symbols-outlined", "play_arrow" }
+                                    "解析預覽"
+                                }
+                            }
+                        }
+                    }
+                } else if *tab.read() == 1 {
+                    div { class: "tab-panel",
+                        div { class: "import-source",
+                            button {
+                                class: "file-picker",
+                                onclick: move |_| choose_file(".apkg"),
+                                div { class: "file-picker-icon",
+                                    span { class: "material-symbols-outlined", "inventory_2" }
+                                }
+                                div { class: "file-picker-text",
+                                    div { class: "file-picker-title", "選擇 .apkg 檔案" }
+                                    div { class: "file-picker-sub", "Anki 牌組包格式，含完整卡片結構" }
+                                }
+                                span { class: "material-symbols-outlined", style: "color: var(--md-sys-color-on-surface-variant)", "chevron_right" }
+                            }
+                            {file_name.read().as_ref().filter(|_| *tab.read() == 1).map(|n| rsx! {
+                                div { class: "file-chip",
+                                    span { class: "material-symbols-outlined", "check" }
+                                    span { "{n}" }
+                                }
+                            })}
+                        }
+                    }
+                } else {
+                    div { class: "tab-panel",
+                        div { class: "import-source",
+                            div { class: "section-label",
+                                span { class: "material-symbols-outlined", "link" }
+                                "Quizlet 網址"
+                            }
+                            div { class: "md3-field",
+                                textarea {
+                                    rows: "4",
+                                    placeholder: "https://quizlet.com/123/deck/\nhttps://quizlet.com/456/flash-cards/",
+                                    value: "{url_text}",
+                                    oninput: move |e| url_text.set(e.value()),
+                                }
+                            }
+                            if !fetch_err.read().is_empty() {
+                                div { class: "error-banner", "{fetch_err.read().clone()}" }
+                            }
+                            div { class: "parse-row",
+                                button {
+                                    class: "md3-btn md3-btn--tonal",
+                                    disabled: loading(),
+                                    onclick: move |_| parse_url(),
+                                    span { class: "material-symbols-outlined", "travel_explore" }
+                                    if loading() { "抓取中…" } else { "抓取並預覽" }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Some((ref words, ref label)) = *parsed.read() {
+                    div { class: "md3-card",
+                        div { class: "md3-card-header",
+                            span { class: "md3-card-title", "{label}" }
+                            button {
+                                class: "md3-card-close",
+                                onclick: move |_| { parsed.set(None); error.set(String::new()); },
+                                span { class: "material-symbols-outlined", "close" }
+                            }
+                        }
+                        if words.len() > 50 {
+                            div { class: "md3-card-sub", "顯示前 50 筆，共 {words.len()} 筆" }
+                        }
+                        div { class: "preview-table-wrap",
+                            table { class: "preview-table",
+                                thead {
+                                    tr {
+                                        th { style: "width:40px", "#" }
+                                        th { "正面" }
+                                        th { "背面" }
+                                    }
+                                }
+                                tbody {
+                                    {words.iter().take(50).enumerate().map(|(i, w)| {
+                                        rsx! {
+                                            tr {
+                                                td { "{i + 1}" }
+                                                td { "{w.front}" }
+                                                td { "{w.back}" }
+                                            }
+                                        }
+                                    })}
+                                    {(words.len() > 50).then(|| {
+                                        rsx! { tr { class: "preview-more", td { colspan: "3", "⋯ 還有 {words.len() - 50} 張卡片" } } }
+                                    })}
+                                }
+                            }
+                        }
+                    }
+                    div { class: "destination",
+                        div { class: "dest-label",
+                            span { class: "material-symbols-outlined", "drive_file_move" }
+                            "匯入目標牌組"
+                        }
+                        // 麵包屑導航
+                        div { class: "dest-breadcrumb",
+                            button {
+                                class: "dest-bc-btn",
+                                onclick: move |_| { dest_folder.set(None); selected_deck_id.set(None); show_create_deck.set(false); },
+                                span { class: "material-symbols-outlined", "folder" }
+                            }
+                            {dest_bc.iter().map(|f| {
+                                let fid = f.id;
+                                let fnm = f.name.clone();
+                                rsx! {
+                                    span { class: "dest-bc-sep", "›" }
+                                    button {
+                                        class: "dest-bc-btn",
+                                        onclick: move |_| { dest_folder.set(Some(fid)); selected_deck_id.set(None); show_create_deck.set(false); },
+                                        "{fnm}"
+                                    }
+                                }
+                            })}
+                        }
+                        // 項目列表
+                        div { class: "dest-items",
+                            div { class: "dest-items-scroll",
+                            {dest_items_vec.iter().map(|item| {
+                                let is_folder = item.is_folder;
+                                let id = item.id;
+                                let nm = item.name.clone();
+                                let wc = item.word_count;
+                                let deck_sel = !is_folder && *selected_deck_id.read() == Some(id);
+                                rsx! {
+                                    if is_folder {
+                                        div {
+                                            key: "folder-{id}",
+                                            class: "dest-folder",
+                                            onclick: move |_| { dest_folder.set(Some(id)); selected_deck_id.set(None); show_create_deck.set(false); },
+                                            span { class: "material-symbols-outlined dest-folder-icon", "folder" }
+                                            div { class: "dest-item-body",
+                                                div { class: "dest-item-name", "{nm}" }
+                                            }
+                                        }
+                                    } else {
+                                        div {
+                                            key: "deck-{id}",
+                                            class: format!("dest-deck{}", if deck_sel { " selected" } else { "" }),
+                                            onclick: move |_| {
+                                                if deck_sel { selected_deck_id.set(None); } else { selected_deck_id.set(Some(id)); }
+                                                show_create_deck.set(false);
+                                            },
+                                            if deck_sel {
+                                                span { class: "material-symbols-outlined dest-deck-check", "check" }
+                                            }
+                                            div { class: "dest-item-body",
+                                                div { class: "dest-item-name", "{nm}" }
+                                                div { class: "dest-item-meta", "{wc} 詞" }
+                                            }
+                                        }
+                                    }
+                                }
+                            })}
+                            }
+                        }
+                        // 新增牌組
+                        if *show_create_deck.read() {
+                            div { class: "dest-create",
+                                input {
+                                    class: "fsrs-input",
+                                    r#type: "text",
+                                    placeholder: "新牌組名稱",
+                                    value: "{create_deck_name}",
+                                    oninput: move |e| create_deck_name.set(e.value()),
+                                }
+                                button {
+                                    class: "text-btn",
+                                    onclick: move |_| show_create_deck.set(false),
+                                    "✕"
+                                }
+                            }
+                        }
+                        if !*show_create_deck.read() {
+                            button {
+                                class: "text-btn",
+                                onclick: move |_| { show_create_deck.set(true); selected_deck_id.set(None); },
+                                span { class: "material-symbols-outlined", "add" }
+                                "新增牌組"
+                            }
+                        }
+                    }
+                    if !error.read().is_empty() {
+                        div { class: "error-banner", "{error.read().clone()}" }
+                    }
+                    div { class: "import-actions",
+                        button {
+                            class: "md3-btn md3-btn--filled",
+                            disabled: loading(),
+                            onclick: move |_| do_import(),
+                            span { class: "material-symbols-outlined", "file_download" }
+                            if loading() { "匯入中…" } else { "匯入到字庫" }
+                        }
+                    }
+                } else if !error.read().is_empty() {
+                    div { class: "error-banner", "{error.read().clone()}" }
+                }
+            }
+        }
     }
 }
 

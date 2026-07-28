@@ -142,6 +142,7 @@ pub enum Screen {
     Library,
     DeckDetail { deck_id: i64 },
     Settings,
+    Import,
 }
 
 #[derive(Clone, Debug)]

@@ -15,6 +15,7 @@ fastrand = "2"
 fsrs = "6"
 tokio = { version = "1", features = ["time"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
+zip = "8"
 dirs = "6"
 
 # --- Quizlet scraper library ---
