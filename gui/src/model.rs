@@ -136,7 +136,7 @@ pub struct Deck {
 
 #[derive(Clone, PartialEq)]
 pub enum Screen {
-    Upload,
+    Exam,
     Quiz,
     QuizFinished,
     Library,

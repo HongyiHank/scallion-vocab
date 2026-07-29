@@ -1,6 +1,5 @@
 use crate::model::Word;
 use dioxus::document;
-use percent_encoding::percent_decode;
 use quizlet_scraper::{build_flashcards_url, extract_deck_id, scrape_quizlet_html};
 use std::collections::HashSet;
 use std::io::Read;
@@ -122,41 +121,6 @@ pub fn clean_recent_urls(urls: Vec<String>, max_len: usize) -> Vec<String> {
         .filter(|url| seen.insert(url.clone()))
         .take(max_len)
         .collect()
-}
-
-pub fn format_url_title(url: &str) -> String {
-    let parsed = match url::Url::parse(url) {
-        Ok(u) => u,
-        Err(_) => return url.to_string(),
-    };
-
-    let segment = parsed
-        .path_segments()
-        .and_then(|segments| {
-            segments
-                .filter(|s| !s.is_empty() && !s.contains("quizlet.com"))
-                .last()
-        })
-        .unwrap_or("");
-
-    if segment.is_empty() {
-        return url.to_string();
-    }
-
-    let decoded = percent_decode(segment.as_bytes()).decode_utf8_lossy();
-
-    decoded
-        .replace('-', " ")
-        .split_whitespace()
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 pub async fn save_recent_urls(urls: &[String]) {

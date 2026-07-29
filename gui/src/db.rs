@@ -470,4 +470,16 @@ impl Database {
         })?.collect::<Result<Vec<_>>>()?;
         Ok(rows)
     }
+
+    /// Returns a map of deck name → color for all non-folder decks.
+    pub fn all_deck_name_colors(&self) -> Result<HashMap<String, String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT name, color FROM decks WHERE is_folder = 0"
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?.collect::<Result<HashMap<String, String>>>()?;
+        Ok(rows)
+    }
 }
