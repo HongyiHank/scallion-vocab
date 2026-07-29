@@ -102,7 +102,7 @@ fn ModalDialog(visible: bool, title: String, children: Element) -> Element {
 #[allow(non_snake_case)]
 fn App() -> Element {
     use_context_provider(|| AppSignals {
-        screen: Signal::new(Screen::Exam),
+        screen: Signal::new(Screen::Library),
         quiz: Signal::new(None),
         toast: Signal::new(None),
         toast_seq: Signal::new(0),
