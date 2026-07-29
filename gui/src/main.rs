@@ -1919,6 +1919,7 @@ fn LibraryScreen() -> Element {
     let mut is_folder_target = use_signal(|| false);
     let mut create_name = use_signal(String::new);
     let mut rename_name = use_signal(String::new);
+    let mut rename_color = use_signal(|| DECK_COLORS[0].to_string());
     let mut refresh = use_signal(|| 0u64);
     let mut selected_color = use_signal(|| DECK_COLORS[0].to_string());
     let mut show_create_word = use_signal(|| false);
@@ -2300,12 +2301,13 @@ fn LibraryScreen() -> Element {
                                                 button {
                                                     class: "deck-btn",
                                                     onclick: move |e| {
-                                                        e.stop_propagation();
-                                                        rename_target.set(deck_id);
-                                                        rename_name.set(deck_name.clone());
-                                                        is_folder_target.set(false);
-                                                        show_rename.set(true);
-                                                    },
+                                                         e.stop_propagation();
+                                                         rename_target.set(deck_id);
+                                                         rename_name.set(deck_name.clone());
+                                                         rename_color.set(color.clone());
+                                                         is_folder_target.set(false);
+                                                         show_rename.set(true);
+                                                     },
                                                     span { class: "material-symbols-outlined", "edit" }
                                                 }
                                                 button {
@@ -2494,6 +2496,27 @@ fn LibraryScreen() -> Element {
                     value: "{rename_name}",
                     oninput: move |e| rename_name.set(e.value()),
                 }
+                if !*is_folder_target.read() {
+                    div { class: "color-picker",
+                        div { class: "color-picker-label", "標記顏色" }
+                        div { class: "color-picker-grid",
+                            {DECK_COLORS.into_iter().map(|c| {
+                                let color = *c;
+                                let selected = *rename_color.read() == color;
+                                rsx! {
+                                    button {
+                                        class: format!("color-swatch{}", if selected { " selected" } else { "" }),
+                                        style: "background: {color}",
+                                        onclick: move |_| rename_color.set(color.to_string()),
+                                        if selected {
+                                            span { class: "material-symbols-outlined", "check" }
+                                        }
+                                    }
+                                }
+                            })}
+                        }
+                    }
+                }
             }
             div { class: "update-actions",
                 button {
@@ -2505,6 +2528,7 @@ fn LibraryScreen() -> Element {
                     class: "update-btn primary",
                     onclick: move |_| {
                         let name = rename_name.read().trim().to_string();
+                        let color = rename_color.read().clone();
                         let id = *rename_target.read();
                         if name.is_empty() { return; }
                         let db = app.db.cloned();
@@ -2513,6 +2537,7 @@ fn LibraryScreen() -> Element {
                                 if let Err(e) = db.rename_deck(id, &name) {
                                     log!("[Library] rename_deck failed: {e}");
                                 }
+                                let _ = db.update_deck_color(id, &color);
                                 refresh.set(refresh() + 1);
                             }
                         });
