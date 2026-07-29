@@ -3194,6 +3194,7 @@ fn SettingsScreen() -> Element {
                                 if v.is_empty() { return; }
                                 if let Ok(n) = v.parse::<i64>() {
                                     app.auto_advance_ms.set(n);
+                                    spawn(async move { persist_auto_advance_ms(n).await; });
                                 }
                             },
                         }
