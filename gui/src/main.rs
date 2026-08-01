@@ -47,6 +47,9 @@ struct ToastState {
     text: String,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum FlashPhase { Idle, Exiting(i32), Entering(i32) }
+
 #[derive(Clone, Debug)]
 struct ExamPendingName {
     pub names: String,
@@ -254,6 +257,9 @@ fn App() -> Element {
                 el = document.querySelector('.settings-close');
                 if (el) { el.click(); return; }
                 el = document.querySelector('.import-back');
+                if (el) { el.click(); return; }
+                // Flash card overlay → close it
+                el = document.querySelector('.flash-overlay.open .flash-close');
                 if (el) { el.click(); return; }
                 // Deck detail screen → back to Library
                 el = document.querySelector('.deck-detail-back');
@@ -1078,6 +1084,159 @@ fn ExamScreen() -> Element {
                         }
                     },
                     "確定"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn FlashCardOverlay(
+    idx: Signal<Option<usize>>,
+    words: Vec<(i64, Word)>,
+    on_close: EventHandler<()>,
+) -> Element {
+    let mut flipped = use_signal(|| false);
+    let mut phase = use_signal(|| FlashPhase::Idle);
+    let total = words.len();
+
+    let mut navigate = move |dir: i32| {
+        if *phase.read() != FlashPhase::Idle {
+            return;
+        }
+        let Some(cur) = *idx.read() else { return };
+        let next = cur as i32 + dir;
+        if next < 0 || next >= total as i32 {
+            return;
+        }
+        phase.set(FlashPhase::Exiting(dir));
+        let next_idx = next as usize;
+        spawn(async move {
+            sleep_ms(300).await;
+            idx.set(Some(next_idx));
+            flipped.set(false);
+            phase.set(FlashPhase::Entering(dir));
+            sleep_ms(30).await;
+            phase.set(FlashPhase::Idle);
+        });
+    };
+
+    let Some(cur) = *idx.read() else {
+        return VNode::empty();
+    };
+    let (_, w) = &words[cur];
+
+    let wrap_class = match *phase.read() {
+        FlashPhase::Idle => "flash-card-wrap idle",
+        FlashPhase::Exiting(1) => "flash-card-wrap exit-next",
+        FlashPhase::Exiting(_) => "flash-card-wrap exit-prev",
+        FlashPhase::Entering(1) => "flash-card-wrap enter-next",
+        FlashPhase::Entering(_) => "flash-card-wrap enter-prev",
+    };
+
+    use_effect(move || {
+        spawn(async move {
+            sleep_ms(50).await;
+            let _ = document::eval("document.querySelector('.flash-overlay.open')?.focus();").await;
+        });
+    });
+
+    let on_close_esc = on_close.clone();
+    let on_close_top = on_close.clone();
+    let on_close_bottom = on_close.clone();
+
+    rsx! {
+        div {
+            class: "flash-overlay open",
+            tabindex: "0",
+            onkeydown: move |e: KeyboardEvent| {
+                match e.key() {
+                    Key::ArrowLeft => navigate(-1),
+                    Key::ArrowRight => navigate(1),
+                    Key::Escape => on_close_esc.call(()),
+                    Key::Enter => {
+                        e.prevent_default();
+                        let f = !*flipped.read();
+                        flipped.set(f);
+                    }
+                    Key::Character(ref s) if s == " " => {
+                        e.prevent_default();
+                        let f = !*flipped.read();
+                        flipped.set(f);
+                    }
+                    _ => {}
+                }
+            },
+            div { class: "flash-topbar",
+                button {
+                    class: "flash-close",
+                    onclick: move |_| on_close_top.call(()),
+                    span { class: "material-symbols-outlined", "close" }
+                }
+                span { class: "counter", "{cur + 1} / {total}" }
+                button { style: "visibility:hidden", span { class: "material-symbols-outlined", "close" } }
+            }
+            div { class: "flash-body",
+                div { class: "flash-card-container",
+                    div {
+                        class: "{wrap_class}",
+                        div {
+                            class: if flipped() { "flash-card flipped" } else { "flash-card" },
+                            onclick: move |_| {
+                                let f = !*flipped.read();
+                                flipped.set(f);
+                            },
+                            div { class: "flash-face flash-front",
+                                div { class: "word", "{w.front}" }
+                                {(!w.pos.is_empty()).then(|| rsx! {
+                                    div { class: "pos", "{w.pos}" }
+                                })}
+                                {(!w.pron.is_empty()).then(|| rsx! {
+                                    div { class: "pron", "{w.pron}" }
+                                })}
+                                div { class: "tap-hint",
+                                    span { class: "material-symbols-outlined", style: "font-size:1rem", "touch_app" }
+                                    span { "點擊翻面" }
+                                }
+                            }
+                            div { class: "flash-face flash-back",
+                                div { class: "translation", "{w.back}" }
+                                div { class: "details",
+                                    {(!w.example.is_empty()).then(|| rsx! {
+                                        div { class: "detail-row",
+                                            span { class: "label", "例句" }
+                                            span { class: "value example", "{w.example}" }
+                                        }
+                                    })}
+                                    {(!w.synonym.is_empty()).then(|| rsx! {
+                                        div { class: "detail-row",
+                                            span { class: "label", "同義詞" }
+                                            span { class: "value", "{w.synonym}" }
+                                        }
+                                    })}
+                                    {(!w.antonym.is_empty()).then(|| rsx! {
+                                        div { class: "detail-row",
+                                            span { class: "label", "反義詞" }
+                                            span { class: "value", "{w.antonym}" }
+                                        }
+                                    })}
+                                }
+                                div { class: "tap-hint",
+                                    span { class: "material-symbols-outlined", style: "font-size:1rem", "touch_app" }
+                                    span { "點擊翻回" }
+                                }
+                            }
+                        }
+                    }
+                }
+                div { class: "flash-bottombar",
+                    button { onclick: move |_| navigate(-1), span { class: "material-symbols-outlined", "chevron_left" } }
+                    button {
+                        class: "close-btn",
+                        onclick: move |_| on_close_bottom.call(()),
+                        span { class: "material-symbols-outlined", "close" }
+                    }
+                    button { onclick: move |_| navigate(1), span { class: "material-symbols-outlined", "chevron_right" } }
                 }
             }
         }
@@ -2777,6 +2936,7 @@ fn DeckDetailScreen() -> Element {
     let mut edit_tags = use_signal(String::new);
     let mut show_delete_confirm = use_signal(|| false);
     let mut delete_target = use_signal(|| 0i64);
+    let mut flash_idx = use_signal::<Option<usize>>(|| None);
 
     rsx! {
         div { class: "deck-detail-screen",
@@ -2798,9 +2958,11 @@ fn DeckDetailScreen() -> Element {
                 }
             } else {
                 div { class: "deck-detail-list",
-                    {word_list.into_iter().map(|(wid, w)| {
+                    {word_list.clone().into_iter().enumerate().map(|(i, (wid, w))| {
                         rsx! {
-                            div { class: "deck-word-item",
+                            div {
+                                class: "deck-word-item",
+                                onclick: move |_| flash_idx.set(Some(i)),
                                 div { class: "word-main",
                                     div { class: "word-front", "{w.front}" }
                                     div { class: "word-back", "{w.back}" }
@@ -2835,7 +2997,8 @@ fn DeckDetailScreen() -> Element {
                                 }
                                 button {
                                     class: "word-edit-btn",
-                                    onclick: move |_| {
+                                    onclick: move |e| {
+                                        e.stop_propagation();
                                         edit_id.set(wid);
                                         edit_front.set(w.front.clone());
                                         edit_back.set(w.back.clone());
@@ -2854,6 +3017,14 @@ fn DeckDetailScreen() -> Element {
                         }
                     })}
                 }
+            }
+        }
+
+        if flash_idx.read().is_some() {
+            FlashCardOverlay {
+                idx: flash_idx,
+                words: word_list.clone(),
+                on_close: move |_| flash_idx.set(None),
             }
         }
 

@@ -1671,6 +1671,164 @@ body::after {
     font-size: .85rem; color: var(--md-sys-color-on-surface);
 }
 
+/* ── Flash Card (full screen) ── */
+.flash-overlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 2000;
+    background: var(--md-sys-color-surface);
+    flex-direction: column;
+    outline: none;
+}
+.flash-overlay.open { display: flex; }
+
+.flash-topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 4px 4px 0; height: 56px; flex-shrink: 0;
+}
+.flash-topbar button {
+    width: 48px; height: 48px; border: none; border-radius: var(--shape-full);
+    background: transparent; color: var(--md-sys-color-on-surface);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 1.4rem;
+}
+.flash-topbar .counter {
+    font-size: .85rem; font-weight: 500; color: var(--md-sys-color-on-surface-variant);
+}
+
+.flash-body {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 16px 24px;
+    overflow: hidden;
+}
+
+.flash-card-container {
+    width: 100%; max-width: 380px;
+    perspective: 1000px;
+}
+
+.flash-card-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 3 / 4.2;
+    transition: transform var(--md-sys-motion-duration-medium4) var(--md-sys-motion-easing-emphasized), opacity var(--md-sys-motion-duration-short4) ease;
+}
+.flash-card-wrap.exit-next {
+    transform: rotate(12deg) translate(130%, -60%) scale(0.85);
+    opacity: 0; pointer-events: none;
+}
+.flash-card-wrap.exit-prev {
+    transform: rotate(-12deg) translate(-130%, -60%) scale(0.85);
+    opacity: 0; pointer-events: none;
+}
+.flash-card-wrap.enter-next {
+    transform: rotate(-6deg) translate(-50%, 40%) scale(0.9);
+    opacity: 0; pointer-events: none;
+}
+.flash-card-wrap.enter-prev {
+    transform: rotate(6deg) translate(50%, 40%) scale(0.9);
+    opacity: 0; pointer-events: none;
+}
+.flash-card-wrap.idle {
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.flash-card {
+    position: absolute; inset: 0;
+    cursor: pointer;
+    transform-style: preserve-3d;
+    transition: transform var(--md-sys-motion-duration-long3) var(--md-sys-motion-easing-emphasized);
+}
+.flash-card.flipped { transform: rotateY(180deg); }
+
+.flash-face {
+    position: absolute; inset: 0;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    border-radius: var(--shape-xxl);
+    padding: 36px 28px;
+    display: flex; flex-direction: column;
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    box-shadow: var(--md-sys-elevation-level3);
+    overflow: hidden;
+}
+.flash-face .tap-hint {
+    position: absolute; bottom: 24px; left: 0; right: 0;
+    font-size: .75rem; color: var(--md-sys-color-on-surface-variant); opacity: .5;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+    text-align: center;
+}
+
+.flash-front {
+    align-items: center; justify-content: center; text-align: center;
+}
+.flash-front .word {
+    font-size: 2rem; font-weight: 700;
+    color: var(--md-sys-color-on-surface);
+    margin-bottom: 8px;
+    word-break: break-word;
+}
+.flash-front .pos {
+    font-size: .85rem; color: var(--md-sys-color-primary);
+    font-weight: 500; margin-bottom: 2px;
+}
+.flash-front .pron {
+    font-size: .9rem; font-style: italic;
+    color: var(--md-sys-color-on-surface-variant);
+    margin-bottom: 8px;
+}
+
+.flash-back { transform: rotateY(180deg); }
+.flash-back .translation {
+    font-size: 1.6rem; font-weight: 600;
+    color: var(--md-sys-color-primary);
+    text-align: center; margin-bottom: 24px;
+    word-break: break-word;
+}
+.flash-back .details {
+    flex: 1; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 12px;
+    scrollbar-width: thin;
+}
+.flash-back .details::-webkit-scrollbar { width: 4px; }
+.flash-back .details::-webkit-scrollbar-thumb {
+    background: var(--md-sys-color-outline-variant); border-radius: 4px;
+}
+.flash-back .detail-row { display: flex; flex-direction: column; gap: 2px; }
+.flash-back .detail-row .label {
+    font-size: .65rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--md-sys-color-on-surface-variant); opacity: .7;
+}
+.flash-back .detail-row .value {
+    font-size: .85rem; line-height: 1.6;
+    color: var(--md-sys-color-on-surface);
+    word-break: break-word;
+}
+.flash-back .detail-row .value.example {
+    font-style: italic; color: var(--md-sys-color-primary);
+}
+
+.flash-bottombar {
+    display: flex; align-items: center; justify-content: center;
+    gap: 24px;
+    margin-top: 24px;
+    flex-shrink: 0;
+}
+.flash-bottombar button {
+    width: 48px; height: 48px; border-radius: var(--shape-full);
+    border: none;
+    background: var(--md-sys-color-surface-container-high);
+    color: var(--md-sys-color-on-surface);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 1.5rem;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard), transform .1s;
+}
+.flash-bottombar button:active { transform: scale(0.92); background: var(--md-sys-color-surface-container-highest); }
+.flash-bottombar .close-btn { color: #ffb4ab; background: color-mix(in srgb, #ffb4ab 12%, transparent); }
+
 /* ── Settings screen ── */
 .settings-screen {
     align-self: stretch; width: 100%;
